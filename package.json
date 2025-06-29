@@ -1,0 +1,42 @@
+{
+  "name": "gh-switcher",
+  "version": "1.0.0",
+  "description": "🎯 Lightweight GitHub account switcher with numbered users and project memory",
+  "main": "gh-switcher.sh",
+  "bin": {
+    "gh-switcher": "./gh-switcher.sh"
+  },
+  "scripts": {
+    "test": "echo \"Tests coming soon\" && exit 0",
+    "install-global": "echo 'source $(pwd)/gh-switcher.sh' >> ~/.zshrc && echo 'Added to ~/.zshrc - restart your terminal'",
+    "uninstall-global": "sed -i.bak '/gh-switcher.sh/d' ~/.zshrc && echo 'Removed from ~/.zshrc'"
+  },
+  "keywords": [
+    "github",
+    "git",
+    "account",
+    "switcher",
+    "cli",
+    "developer-tools",
+    "productivity",
+    "project-management"
+  ],
+  "author": "Alex T. Huth",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexthuth/gh-switcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alexthuth/gh-switcher/issues"
+  },
+  "homepage": "https://github.com/alexthuth/gh-switcher#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "preferGlobal": true,
+  "os": [
+    "darwin",
+    "linux"
+  ]
+}
