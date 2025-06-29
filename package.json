@@ -21,16 +21,16 @@
     "productivity",
     "project-management"
   ],
-  "author": "Alex T. Huth",
+  "author": "seconds-0",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/alexthuth/gh-switcher.git"
+    "url": "https://github.com/seconds-0/gh-switcher.git"
   },
   "bugs": {
-    "url": "https://github.com/alexthuth/gh-switcher/issues"
+    "url": "https://github.com/seconds-0/gh-switcher/issues"
   },
-  "homepage": "https://github.com/alexthuth/gh-switcher#readme",
+  "homepage": "https://github.com/seconds-0/gh-switcher#readme",
   "engines": {
     "node": ">=14.0.0"
   },

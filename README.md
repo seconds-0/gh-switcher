@@ -18,7 +18,7 @@ This tool solves all three problems with **numbered users**, **project-specific 
 Clone and install in one command:
 
 ```bash
-git clone https://github.com/alexthuth/gh-switcher.git
+git clone https://github.com/personal-acct/gh-switcher.git
 cd gh-switcher
 ./gh-switcher.sh install
 ```
@@ -42,12 +42,12 @@ After installation, restart your terminal or run `source ~/.zshrc`, then use `gh
 
 ```bash
 # First, add your users to get numbered IDs
-ghs add-user alexthuth
+ghs add-user personal-acct
 ghs add-user work-account
-# ✅ Added alexthuth to user list
+# ✅ Added personal-acct to user list
 # ✅ Added work-account to user list
 # 📋 Available users:
-#   🟢 1. alexthuth (current)
+#   🟢 1. personal-acct (current)
 #   ⚪ 2. work-account
 
 # Assign user to project (much easier!)
@@ -60,33 +60,33 @@ ghs
 # 🎯 GitHub Project Switcher
 # 
 # 📍 Current project: my-project
-# 🔑 Current user: alexthuth (#1)
+# 🔑 Current user: personal-acct (#1)
 # ⚠️  Project should use: work-account (#2)
 #
 # 📋 Available users:
-#   🟢 1. alexthuth (current)
+#   🟢 1. personal-acct (current)
 #   ⚪ 2. work-account
 #
 # ⚡ Quick actions:
-#   ghs switch 1    # Switch to alexthuth
+#   ghs switch 1    # Switch to personal-acct
 #   ghs switch 2    # Switch to work-account
-#   ghs assign 1    # Assign alexthuth to project
+#   ghs assign 1    # Assign personal-acct to project
 #   ghs assign 2    # Assign work-account to project
 
 # Quick switch to any user by number
 ghs switch 1
-# ✅ Switched to alexthuth (#1)
+# ✅ Switched to personal-acct (#1)
 
 # Check current status (shows user numbers!)
 ghs status
 # 📍 Current project: my-project
-# 🔑 Current GitHub user: alexthuth (#1)
+# 🔑 Current GitHub user: personal-acct (#1)
 # ⚠️  This project should use: work-account (#2)
 
 # See all users with numbers
 ghs users
 # 📋 Available users:
-#   🟢 1. alexthuth (current)
+#   🟢 1. personal-acct (current)
 #   ⚪ 2. work-account
 
 # List all configured projects (shows user numbers!)
@@ -135,7 +135,7 @@ project-name=github-username
 ### 🎯 **Smart Dashboard & Numbered Users**
 - **Discoverable**: Run `ghs` to see current status and all available actions
 - **Contextual**: Shows exactly what you need to know: current user, project preference, and quick commands
-- **Add once, use everywhere**: `ghs add-user alexthuth` → now you can use `#1` everywhere  
+- **Add once, use everywhere**: `ghs add-user personal-acct` → now you can use `#1` everywhere  
 - **No more username typos**: `ghs assign 2` instead of `ghs assign my-complex-username`
 - **Visual user list**: See all your accounts numbered and know which is currently active
 - **Super fast switching**: `ghs switch 1` switches immediately
