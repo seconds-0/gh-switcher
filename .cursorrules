@@ -1,0 +1,129 @@
+# GitHub Switcher (gh-switcher) Project Rules
+
+## Project Overview
+gh-switcher (ghs) is a lightweight, secure GitHub account switcher for the command line. It enables developers to manage multiple GitHub accounts (personal, work, client) with project-specific memory and numbered user references for easy switching.
+
+## Core Philosophy
+- **CLI-first**: Command-line tool optimized for automation and scripting
+- **Simple over complex**: Avoid overengineering, focus on solving real problems
+- **Automation-friendly**: All commands must be scriptable, no interactive-only features
+- **GitHub-specific**: Not a generic git profile manager - focus on GitHub account switching
+- **Project-aware**: Remember which account belongs to which project
+
+## Technology Stack
+- **Language**: Bash script (POSIX-compatible where possible)
+- **Dependencies**: 
+  - GitHub CLI (`gh`) - required for authentication
+  - Git - required for repository operations
+  - Standard Unix tools (base64, grep, sed, etc.)
+- **Target Platforms**: macOS, Linux, WSL on Windows
+- **Shell Support**: Bash, Zsh (primary), Fish (secondary)
+
+## Key Features
+1. **Numbered Users**: Users are referenced by numbers (1, 2, 3) not usernames
+2. **Project Memory**: Projects remember their associated GitHub account
+3. **Smart Dashboard**: Running `ghs` shows current status and available actions
+4. **Simple Commands**: `ghs switch 2`, `ghs assign 1`, etc.
+
+## Code Guidelines
+
+### Shell Script Best Practices
+- Use quotes around all variables: `"$var"` not `$var`
+- Check command success: `if command; then` not `command && then`
+- Use meaningful function names that describe actions
+- Prefer `[[ ]]` over `[ ]` for conditionals in bash
+- Always provide fallback values: `${VAR:-default}`
+
+### Error Handling
+- Every function should return meaningful exit codes
+- User-facing errors should use emoji indicators:
+  - ❌ for errors
+  - ⚠️ for warnings
+  - ✅ for success
+  - 💡 for tips/suggestions
+- Provide actionable error messages with solutions
+
+### Data Storage
+- Configuration files in home directory:
+  - `~/.gh-project-accounts` - project to account mapping
+  - `~/.gh-users` - list of GitHub usernames
+  - `~/.gh-user-profiles` - enhanced profile data (future)
+- Use simple text formats (newline-delimited, colon-separated)
+- Always create backups before modifying config files
+
+### Function Structure
+```bash
+function_name() {
+    local arg1="$1"
+    local arg2="$2"
+    
+    # Validate inputs
+    if [[ -z "$arg1" ]]; then
+        echo "❌ Error message"
+        return 1
+    fi
+    
+    # Main logic
+    
+    # Success
+    echo "✅ Success message"
+    return 0
+}
+```
+
+### Testing Approach
+- Test with multiple GitHub accounts
+- Test with missing dependencies
+- Test with corrupted config files
+- Test with special characters in usernames/paths
+- Test on different shells (bash, zsh, fish)
+
+## Development Priorities
+1. **Reliability over features**: Core switching must always work
+2. **User experience**: Clear feedback, helpful error messages
+3. **Performance**: Commands should complete in <100ms
+4. **Backwards compatibility**: Don't break existing users' setups
+
+## Anti-Patterns to Avoid
+- ❌ Don't add TUI/interactive menus as primary interface
+- ❌ Don't create git subcommands (keep `ghs` identity)
+- ❌ Don't manage SSH configs directly (use git config)
+- ❌ Don't add complex state management
+- ❌ Don't require configuration files to function
+- ❌ Don't add dependencies beyond gh and git
+
+## Feature Implementation Guidelines
+When implementing new features:
+1. Start with the simplest solution that works
+2. Add complexity only when users request it
+3. Maintain backward compatibility
+4. Keep the numbered user system intact
+5. Ensure all features work via CLI (no interactive-only)
+
+## Documentation Standards
+- User-facing docs go in `docs/`
+- Internal planning docs go in `Documentation/Plans/`
+- Each feature gets a plan document with:
+  - Problem statement
+  - Proposed solution
+  - User experience mockups
+  - Implementation details
+  - Testing plan
+
+## Commit Message Format
+```
+type: brief description
+
+Longer explanation if needed. Focus on why not what.
+
+Fixes #issue
+```
+
+Types: feat, fix, docs, refactor, test, chore
+
+## Future Feature Phases
+- **Phase 1**: Enhanced profiles, SSH integration, directory auto-switching
+- **Phase 2**: Team features, profile sharing, templates
+- **Phase 3**: Polish, validations, integrations
+
+Remember: This tool solves a specific problem well. Resist scope creep. 

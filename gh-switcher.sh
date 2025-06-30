@@ -105,6 +105,7 @@
 # Hard-coded paths - works great for single-user scenarios
 GH_PROJECT_CONFIG="$HOME/.gh-project-accounts"
 GH_USERS_CONFIG="$HOME/.gh-users"
+GH_USER_PROFILES="$HOME/.gh-user-profiles"
 
 # NOTE: For library version, these would become:
 # GH_PROJECT_CONFIG="$GH_SWITCHER_DIR/$GH_SWITCHER_NAMESPACE/projects"  
@@ -161,6 +162,9 @@ add_user() {
     # LIBRARY NOTE: Would need atomic write operation with proper error handling
     echo "$username" >> "$GH_USERS_CONFIG"
     echo "✅ Added $username to user list"
+    
+    # Auto-create profile from current git config
+    create_user_profile "$username" "" "" "true"
     
     # Show current list with numbers
     # LIBRARY NOTE: This UI coupling would be removed - caller decides what to show
@@ -235,6 +239,498 @@ get_user_by_id() {
     fi
     
     echo "$username"
+}
+
+# Helper function to check if git is available and working
+check_git_availability() {
+    if ! command -v git >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Test if git works by checking version
+    if ! git --version >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    return 0
+}
+
+# Helper function to detect current git configuration with comprehensive fallbacks
+detect_git_config() {
+    local scope="${1:-local}"  # 'local', 'global', or 'auto'
+    
+    if ! check_git_availability; then
+        return 1
+    fi
+    
+    local git_name=""
+    local git_email=""
+    
+    if [[ "$scope" == "global" ]]; then
+        # Only check global config
+        git_name=$(git config --global --get user.name 2>/dev/null || echo "")
+        git_email=$(git config --global --get user.email 2>/dev/null || echo "")
+    elif [[ "$scope" == "local" ]]; then
+        # Only check local config (repository-specific)
+        git_name=$(git config --local --get user.name 2>/dev/null || echo "")
+        git_email=$(git config --local --get user.email 2>/dev/null || echo "")
+    else
+        # Auto mode: check local first, then global, then system
+        git_name=$(git config --get user.name 2>/dev/null || echo "")
+        git_email=$(git config --get user.email 2>/dev/null || echo "")
+    fi
+    
+    # Validate that we got actual values (not just empty strings)
+    if [[ -z "$git_name" && -z "$git_email" ]]; then
+        # If nothing found and we were looking for local, try global as fallback
+        if [[ "$scope" == "local" ]]; then
+            git_name=$(git config --global --get user.name 2>/dev/null || echo "")
+            git_email=$(git config --global --get user.email 2>/dev/null || echo "")
+        fi
+    fi
+    
+    echo "name:$git_name"
+    echo "email:$git_email"
+    return 0
+}
+
+# Helper function to validate input for profile creation
+validate_profile_input() {
+    local username="$1"
+    local name="$2" 
+    local email="$3"
+    
+    # Username validation
+    if [[ -z "$username" ]]; then
+        echo "❌ Username cannot be empty"
+        return 1
+    fi
+    
+    if [[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        echo "❌ Username contains invalid characters (only letters, numbers, dots, underscores, and hyphens allowed)"
+        return 1
+    fi
+    
+    # Name validation
+    if [[ -z "$name" ]]; then
+        echo "❌ Name cannot be empty"
+        return 1
+    fi
+    
+    if [[ ${#name} -gt 255 ]]; then
+        echo "❌ Name too long (max 255 characters)"
+        return 1
+    fi
+    
+    # Email validation
+    if [[ -z "$email" ]]; then
+        echo "❌ Email cannot be empty"
+        return 1
+    fi
+    
+    if [[ ! "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+        echo "❌ Invalid email format"
+        return 1
+    fi
+    
+    if [[ ${#email} -gt 255 ]]; then
+        echo "❌ Email too long (max 255 characters)"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Helper function to encode profile data safely
+encode_profile_value() {
+    local value="$1"
+    # Use base64 encoding to handle any special characters
+    echo "$value" | base64 | tr -d '\n'
+}
+
+# Helper function to decode profile data safely
+decode_profile_value() {
+    local encoded_value="$1"
+    echo "$encoded_value" | base64 -d 2>/dev/null || echo ""
+}
+
+# Helper function to write profile safely
+write_profile_entry() {
+    local username="$1"
+    local name="$2"
+    local email="$3"
+    
+    # Validate inputs
+    if ! validate_profile_input "$username" "$name" "$email"; then
+        return 1
+    fi
+    
+    # Encode values safely
+    local encoded_name=$(encode_profile_value "$name")
+    local encoded_email=$(encode_profile_value "$email")
+    
+    if [[ -z "$encoded_name" || -z "$encoded_email" ]]; then
+        echo "❌ Failed to encode profile data"
+        return 1
+    fi
+    
+    # Create profile directory if it doesn't exist
+    local profile_dir=$(dirname "$GH_USER_PROFILES")
+    if [[ ! -d "$profile_dir" ]]; then
+        mkdir -p "$profile_dir" 2>/dev/null
+        if [[ $? -ne 0 ]]; then
+            echo "❌ Failed to create profile directory: $profile_dir"
+            return 1
+        fi
+    fi
+    
+    # Create/update the profile with atomic write
+    touch "$GH_USER_PROFILES" 2>/dev/null
+    if [[ $? -ne 0 ]]; then
+        echo "❌ Cannot create profile file: $GH_USER_PROFILES"
+        return 1
+    fi
+    
+    # Remove existing profile for this user
+    if [[ -f "$GH_USER_PROFILES" ]]; then
+        grep -v "^$username:" "$GH_USER_PROFILES" > "${GH_USER_PROFILES}.tmp" 2>/dev/null || true
+    else
+        touch "${GH_USER_PROFILES}.tmp"
+    fi
+    
+    # Add new profile (format: username:version:base64(name):base64(email))
+    echo "$username:1:$encoded_name:$encoded_email" >> "${GH_USER_PROFILES}.tmp"
+    
+    # Atomic move
+    if mv "${GH_USER_PROFILES}.tmp" "$GH_USER_PROFILES" 2>/dev/null; then
+        return 0
+    else
+        echo "❌ Failed to update profile file"
+        rm -f "${GH_USER_PROFILES}.tmp" 2>/dev/null
+        return 1
+    fi
+}
+
+# Helper function to create a user profile (links GitHub username to git config)
+create_user_profile() {
+    local username="$1"
+    local name="$2"
+    local email="$3"
+    local auto_capture="${4:-false}"  # Whether to auto-capture from current git config
+    
+    if [[ -z "$username" ]]; then
+        echo "❌ Username required for profile creation"
+        return 1
+    fi
+    
+    # Auto-capture current git config if requested
+    if [[ "$auto_capture" == "true" ]]; then
+        local current_config=$(detect_git_config "local")
+        if [[ $? -eq 0 ]]; then
+            local current_name=$(echo "$current_config" | grep "^name:" | cut -d':' -f2-)
+            local current_email=$(echo "$current_config" | grep "^email:" | cut -d':' -f2-)
+            
+            # Use current config if available
+            if [[ -n "$current_name" ]]; then
+                name="$current_name"
+            fi
+            if [[ -n "$current_email" ]]; then
+                email="$current_email"
+            fi
+        fi
+        
+        # If still empty, try global config
+        if [[ -z "$name" || -z "$email" ]]; then
+            local global_config=$(detect_git_config "global")
+            if [[ $? -eq 0 ]]; then
+                local global_name=$(echo "$global_config" | grep "^name:" | cut -d':' -f2-)
+                local global_email=$(echo "$global_config" | grep "^email:" | cut -d':' -f2-)
+                
+                if [[ -z "$name" && -n "$global_name" ]]; then
+                    name="$global_name"
+                fi
+                if [[ -z "$email" && -n "$global_email" ]]; then
+                    email="$global_email"
+                fi
+            fi
+        fi
+    fi
+    
+    # Use defaults if still empty
+    if [[ -z "$name" ]]; then
+        name="$username"
+    fi
+    if [[ -z "$email" ]]; then
+        email="${username}@users.noreply.github.com"
+    fi
+    
+    # Write the profile
+    if write_profile_entry "$username" "$name" "$email"; then
+        echo "✅ Created profile for $username: $name <$email>"
+        return 0
+    else
+        echo "❌ Failed to create profile for $username"
+        return 1
+    fi
+}
+
+# Helper function to migrate old profile format to new format
+migrate_old_profile_format() {
+    if [[ ! -f "$GH_USER_PROFILES" ]]; then
+        return 0
+    fi
+    
+    # Check if file contains old format (has = instead of :)
+    if grep -q "=" "$GH_USER_PROFILES" 2>/dev/null; then
+        echo "🔄 Migrating profiles to new format..."
+        local backup_file="${GH_USER_PROFILES}.backup.$(date +%s)"
+        
+        # Create backup
+        if ! cp "$GH_USER_PROFILES" "$backup_file" 2>/dev/null; then
+            echo "⚠️  Could not create profile backup"
+            return 1
+        fi
+        
+        # Create temporary file for new format
+        local temp_file="${GH_USER_PROFILES}.migrating"
+        > "$temp_file"
+        
+        # Migrate each line
+        local migration_failed=false
+        while IFS='=' read -r username profile_data; do
+            if [[ -n "$username" && -n "$profile_data" ]]; then
+                local name=$(echo "$profile_data" | cut -d'|' -f1)
+                local email=$(echo "$profile_data" | cut -d'|' -f2)
+                
+                if [[ -n "$name" && -n "$email" ]]; then
+                    # Encode safely
+                    local encoded_name=$(encode_profile_value "$name")
+                    local encoded_email=$(encode_profile_value "$email")
+                    
+                    if [[ -n "$encoded_name" && -n "$encoded_email" ]]; then
+                        echo "$username:1:$encoded_name:$encoded_email" >> "$temp_file"
+                    else
+                        echo "⚠️  Failed to migrate profile for $username"
+                        migration_failed=true
+                    fi
+                fi
+            fi
+        done < "$GH_USER_PROFILES"
+        
+        if [[ "$migration_failed" == "false" ]]; then
+            # Migration successful, replace original
+            if mv "$temp_file" "$GH_USER_PROFILES" 2>/dev/null; then
+                echo "✅ Profile migration completed (backup: $backup_file)"
+                return 0
+            else
+                echo "❌ Failed to replace profile file"
+                rm -f "$temp_file" 2>/dev/null
+                return 1
+            fi
+        else
+            echo "❌ Profile migration failed, keeping original format"
+            rm -f "$temp_file" 2>/dev/null
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+# Helper function to get user profile (returns git config for a GitHub username)
+get_user_profile() {
+    local username="$1"
+    
+    if [[ -z "$username" ]]; then
+        return 1
+    fi
+    
+    if [[ ! -f "$GH_USER_PROFILES" ]]; then
+        return 1
+    fi
+    
+    # Try migration if needed
+    migrate_old_profile_format
+    
+    # Look for new format first (username:version:name:email)
+    local profile_line=$(grep "^$username:" "$GH_USER_PROFILES" 2>/dev/null | head -1)
+    
+    if [[ -n "$profile_line" ]]; then
+        # New format: username:version:base64(name):base64(email)
+        local version=$(echo "$profile_line" | cut -d':' -f2)
+        local encoded_name=$(echo "$profile_line" | cut -d':' -f3)
+        local encoded_email=$(echo "$profile_line" | cut -d':' -f4)
+        
+        if [[ "$version" == "1" && -n "$encoded_name" && -n "$encoded_email" ]]; then
+            local name=$(decode_profile_value "$encoded_name")
+            local email=$(decode_profile_value "$encoded_email")
+            
+            if [[ -n "$name" && -n "$email" ]]; then
+                echo "name:$name"
+                echo "email:$email"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Fallback: try old format for compatibility (username=name|email)
+    local old_profile=$(grep "^$username=" "$GH_USER_PROFILES" 2>/dev/null | cut -d'=' -f2)
+    if [[ -n "$old_profile" ]]; then
+        local name=$(echo "$old_profile" | cut -d'|' -f1)
+        local email=$(echo "$old_profile" | cut -d'|' -f2)
+        
+        if [[ -n "$name" && -n "$email" ]]; then
+            echo "name:$name"
+            echo "email:$email"
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# Helper function to apply user profile (set git config from stored profile)
+apply_user_profile() {
+    local username="$1"
+    local scope="${2:-local}"  # 'local' or 'global'
+    
+    if [[ -z "$username" ]]; then
+        echo "❌ Username required for profile application"
+        return 1
+    fi
+    
+    local profile=$(get_user_profile "$username")
+    if [[ $? -ne 0 ]]; then
+        echo "❌ No profile found for user: $username"
+        return 1
+    fi
+    
+    local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
+    local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+    
+    if [[ -z "$name" || -z "$email" ]]; then
+        echo "❌ Invalid profile data for user: $username"
+        return 1
+    fi
+    
+    if apply_git_config "$name" "$email" "$scope"; then
+        return 0
+    else
+        echo "❌ Failed to apply profile for user: $username"
+        return 1
+    fi
+}
+
+# Helper function to apply git configuration with validation
+apply_git_config() {
+    local name="$1"
+    local email="$2"
+    local scope="${3:-local}"  # 'local' or 'global'
+    
+    # Validate inputs
+    if ! validate_profile_input "temp" "$name" "$email"; then
+        return 1
+    fi
+    
+    # Check git availability
+    if ! check_git_availability; then
+        echo "❌ Git is not available or not working"
+        return 1
+    fi
+    
+    # Validate scope
+    if [[ "$scope" != "local" && "$scope" != "global" ]]; then
+        echo "❌ Invalid scope: $scope (must be 'local' or 'global')"
+        return 1
+    fi
+    
+    local git_flags=""
+    if [[ "$scope" == "global" ]]; then
+        git_flags="--global"
+    else
+        git_flags="--local"
+        
+        # Check if we're in a git repository for local config
+        if ! git rev-parse --git-dir >/dev/null 2>&1; then
+            echo "❌ Not in a git repository (required for local config)"
+            return 1
+        fi
+    fi
+    
+    # Apply the configuration with individual error checking
+    local name_result=true
+    local email_result=true
+    
+    if ! git config $git_flags user.name "$name" 2>/dev/null; then
+        echo "❌ Failed to set git user.name"
+        name_result=false
+    fi
+    
+    if ! git config $git_flags user.email "$email" 2>/dev/null; then
+        echo "❌ Failed to set git user.email" 
+        email_result=false
+    fi
+    
+    # Check results
+    if [[ "$name_result" == "true" && "$email_result" == "true" ]]; then
+        # Verify the configuration was actually set
+        local verify_name=$(git config $git_flags --get user.name 2>/dev/null || echo "")
+        local verify_email=$(git config $git_flags --get user.email 2>/dev/null || echo "")
+        
+        if [[ "$verify_name" == "$name" && "$verify_email" == "$email" ]]; then
+            if [[ "$scope" == "global" ]]; then
+                echo "✅ Updated global git config: $name <$email>"
+            else
+                echo "✅ Updated local git config: $name <$email>"
+            fi
+            return 0
+        else
+            echo "❌ Git config verification failed (values not set correctly)"
+            return 1
+        fi
+    else
+        echo "❌ Failed to update git config"
+        return 1
+    fi
+}
+
+# Helper function to perform first-time setup
+first_time_setup() {
+    # Check if GitHub CLI is available and authenticated
+    if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+        echo "⚠️  GitHub CLI not authenticated"
+        echo "   Run 'gh auth login' to get started, then try again"
+        return 1
+    fi
+    
+    # Get current GitHub user
+    local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
+    if [[ -z "$current_user" ]]; then
+        echo "❌ Could not detect current GitHub user"
+        return 1
+    fi
+    
+    echo "🎯 First-time setup detected!"
+    echo "📝 Current GitHub user: $current_user"
+    echo "💾 Creating profile from current git config..."
+    
+    # Add current user to the list (this will auto-create profile)
+    add_user "$current_user" >/dev/null 2>&1
+    
+    # Assign current user to current project
+    local project="$(basename "$PWD")"
+    touch "$GH_PROJECT_CONFIG"
+    grep -v "^$project=" "$GH_PROJECT_CONFIG" > "${GH_PROJECT_CONFIG}.tmp" 2>/dev/null || true
+    echo "$project=$current_user" >> "${GH_PROJECT_CONFIG}.tmp"
+    mv "${GH_PROJECT_CONFIG}.tmp" "$GH_PROJECT_CONFIG"
+    
+    echo "✅ Setup complete!"
+    echo "   • Added $current_user to user list"
+    echo "   • Created git config profile"
+    echo "   • Assigned $current_user to project: $project"
+    echo ""
+    
+    return 0
 }
 
 # Helper function to remove a user from the global list
@@ -353,6 +849,80 @@ ghs() {
             list_users
             ;;
             
+        "profiles")
+            if [[ ! -f "$GH_USER_PROFILES" || ! -s "$GH_USER_PROFILES" ]]; then
+                echo "📋 No user profiles configured yet"
+                echo "   Profiles are created automatically when you add/switch users"
+                return 0
+            fi
+            
+            echo "📋 User profiles:"
+            
+            # Try migration first
+            migrate_old_profile_format
+            
+            while IFS=':' read -r username version encoded_name encoded_email || IFS='=' read -r username old_profile; do
+                if [[ -n "$username" ]]; then
+                    local name=""
+                    local email=""
+                    
+                    # Handle new format (username:version:base64(name):base64(email))
+                    if [[ -n "$version" && -n "$encoded_name" && -n "$encoded_email" ]]; then
+                        name=$(decode_profile_value "$encoded_name")
+                        email=$(decode_profile_value "$encoded_email")
+                    # Handle old format fallback (username=name|email)
+                    elif [[ -n "$old_profile" ]]; then
+                        name=$(echo "$old_profile" | cut -d'|' -f1)
+                        email=$(echo "$old_profile" | cut -d'|' -f2)
+                    fi
+                    
+                    if [[ -n "$name" && -n "$email" ]]; then
+                        # Check if this is a configured user
+                        local user_id=""
+                        if [[ -f "$GH_USERS_CONFIG" ]]; then
+                            user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
+                        fi
+                        
+                        if [[ -n "$user_id" ]]; then
+                            echo "  🟢 $username (#$user_id): $name <$email>"
+                        else
+                            echo "  ⚪ $username: $name <$email>"
+                        fi
+                    fi
+                fi
+            done < "$GH_USER_PROFILES"
+            ;;
+            
+        "update-profile")
+            local input="$2"
+            if [[ -z "$input" ]]; then
+                echo "❌ Usage: ghs update-profile <username_or_number>"
+                echo "   Use 'ghs profiles' to see available profiles"
+                return 1
+            fi
+            
+            local username=""
+            if [[ "$input" =~ ^[0-9]+$ ]]; then
+                username=$(get_user_by_id "$input")
+                if [[ $? -ne 0 ]]; then
+                    return 1
+                fi
+            else
+                username="$input"
+            fi
+            
+            echo "Updating profile for $username:"
+            read -p "Enter name: " new_name
+            read -p "Enter email: " new_email
+            
+            if [[ -z "$new_name" || -z "$new_email" ]]; then
+                echo "❌ Name and email cannot be empty"
+                return 1
+            fi
+            
+            create_user_profile "$username" "$new_name" "$new_email" "false"
+            ;;
+            
         "switch")
             local user_id="$2"
             if [[ -z "$user_id" ]]; then
@@ -363,9 +933,35 @@ ghs() {
             
             local username=$(get_user_by_id "$user_id")
             if [[ $? -eq 0 ]]; then
-                # Switch to the user
+                # Switch to the user first
                 if gh auth switch --user "$username" 2>/dev/null; then
                     echo "✅ Switched to $username (#$user_id)"
+                    
+                    # Check if user has a profile
+                    local profile=$(get_user_profile "$username")
+                    if [[ $? -eq 0 ]]; then
+                        # Profile exists - apply it automatically
+                        if apply_user_profile "$username" "local"; then
+                            local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
+                            local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+                            echo "🔧 Applied git config: $name <$email>"
+                        else
+                            echo "⚠️  Could not apply git config profile (continuing with GitHub switch)"
+                        fi
+                    else
+                        # No profile exists - create one from current config
+                        echo "💡 Creating profile for $username from current git config"
+                        if create_user_profile "$username" "" "" "true"; then
+                            # Now apply the newly created profile
+                            if apply_user_profile "$username" "local"; then
+                                echo "🔧 Applied newly created git config profile"
+                            else
+                                echo "⚠️  Created profile but could not apply git config"
+                            fi
+                        else
+                            echo "⚠️  Could not create git config profile (continuing with GitHub switch)"
+                        fi
+                    fi
                 else
                     echo "❌ Failed to switch to $username"
                     echo "   Account may not be authenticated. Run: gh auth login"
@@ -566,6 +1162,8 @@ ghs() {
             echo "USER MANAGEMENT:"
             echo "  ghs users                  Show numbered list of users"
             echo "  ghs remove-user <user>     Remove user by name or number"
+            echo "  ghs profiles               Show user git config profiles"
+            echo "  ghs update-profile <user>  Update git config profile"
             echo ""
             echo "PROJECT & STATUS:"
             echo "  ghs status                 Show detailed current status"
@@ -596,6 +1194,15 @@ ghs() {
             # - Custom branding/colors per tool
             # - Different output formats (JSON, plain text, etc.)
             # - Integration with other tools' UIs
+            
+            # Check for first-time setup
+            if [[ ! -f "$GH_USERS_CONFIG" || ! -s "$GH_USERS_CONFIG" ]]; then
+                first_time_setup
+                if [[ $? -ne 0 ]]; then
+                    return 1
+                fi
+            fi
+            
             echo "🎯 GitHub Project Switcher"
             echo ""
             
@@ -617,6 +1224,33 @@ ghs() {
                 
                 if [[ "$user_in_list" == true ]]; then
                     echo "🔑 Current user: $current_user (#$current_user_id)"
+                    
+                    # Show git config status
+                    local profile=$(get_user_profile "$current_user")
+                    if [[ $? -eq 0 ]]; then
+                        local current_git_config=$(detect_git_config "auto")
+                        if [[ $? -eq 0 ]]; then
+                            local current_git_name=$(echo "$current_git_config" | grep "^name:" | cut -d':' -f2-)
+                            local current_git_email=$(echo "$current_git_config" | grep "^email:" | cut -d':' -f2-)
+                            
+                            local profile_name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
+                            local profile_email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+                            
+                            if [[ -n "$current_git_name" && -n "$current_git_email" ]]; then
+                                if [[ "$current_git_name" == "$profile_name" && "$current_git_email" == "$profile_email" ]]; then
+                                    echo "🔧 Git config: ✅ matches profile"
+                                else
+                                    echo "🔧 Git config: ⚠️  mismatch ($current_git_name <$current_git_email>)"
+                                fi
+                            else
+                                echo "🔧 Git config: ❌ not configured"
+                            fi
+                        else
+                            echo "🔧 Git config: ❌ git not available"
+                        fi
+                    else
+                        echo "🔧 Git config: ❓ no profile"
+                    fi
                 else
                     echo "🔑 Current user: $current_user"
                     # Show onboarding prompt if user is not in list
