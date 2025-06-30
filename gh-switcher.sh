@@ -119,10 +119,39 @@ GH_USER_PROFILES="$HOME/.gh-user-profiles"
 # - UI output would be handled by caller: gh_switcher_show_add_user_result()
 # - Would need namespace support: check $GH_SWITCHER_NAMESPACE/users instead of global file
 # - Would need initialization check: ensure config directory exists before writing
+#
+# TEST NOTES:
+# - Test with --ssh-key option and valid SSH keys
+# - Test with --ssh-key option and invalid SSH keys
+# - Test adding current user with SSH detection
+# - Test adding user without SSH key (HTTPS mode)
+# - Test with usernames that already exist
 add_user() {
     local username="$1"
+    local ssh_key_path=""
+    
+    # Parse arguments for SSH key option
+    shift  # Remove username from args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ssh-key)
+                ssh_key_path="$2"
+                shift 2
+                ;;
+            *)
+                echo "❌ Unknown option: $1"
+                echo "   Usage: ghs add-user <username> [--ssh-key <path>]"
+                return 1
+                ;;
+        esac
+    done
+    
     if [[ -z "$username" ]]; then
-        echo "❌ Usage: ghs add-user <username>"
+        echo "❌ Usage: ghs add-user <username> [--ssh-key <path>]"
+        echo "   Examples:"
+        echo "     ghs add-user work-account --ssh-key ~/.ssh/id_rsa_work"
+        echo "     ghs add-user personal"
+        echo "     ghs add-user current"
         return 1
     fi
     
@@ -163,8 +192,8 @@ add_user() {
     echo "$username" >> "$GH_USERS_CONFIG"
     echo "✅ Added $username to user list"
     
-    # Auto-create profile from current git config
-    create_user_profile "$username" "" "" "true"
+    # Auto-create profile from current git config with SSH key
+    create_user_profile "$username" "" "" "true" "$ssh_key_path"
     
     # Show current list with numbers
     # LIBRARY NOTE: This UI coupling would be removed - caller decides what to show
@@ -179,10 +208,16 @@ add_user() {
 # - UI formatting would be separate: gh_switcher_format_user_list()
 # - Would support filtering/sorting options
 # - Would handle namespace isolation automatically
+#
+# TEST NOTES:
+# - Test display with SSH and HTTPS users mixed
+# - Test with invalid SSH keys in profiles
+# - Test with users that have no profiles
+# - Test current user detection with SSH users
 list_users() {
     if [[ ! -f "$GH_USERS_CONFIG" || ! -s "$GH_USERS_CONFIG" ]]; then
         echo "📋 No users configured yet"
-        echo "   Use 'ghs add-user <username>' to add users"
+        echo "   Use 'ghs add-user <username> [--ssh-key <path>]' to add users"
         return 0
     fi
     
@@ -190,18 +225,32 @@ list_users() {
     local i=1
     while IFS= read -r username; do
         if [[ -n "$username" ]]; then
+            # Get profile info to check for SSH key
+            local profile=$(get_user_profile "$username")
+            local ssh_status=""
+            if [[ $? -eq 0 ]]; then
+                local ssh_key_path=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
+                if [[ -n "$ssh_key_path" ]]; then
+                    ssh_status=" [SSH: $ssh_key_path]"
+                else
+                    ssh_status=" [HTTPS]"
+                fi
+            else
+                ssh_status=" [No profile]"
+            fi
+            
             # Check if this is the current user
             # LIBRARY NOTE: This external dependency check would be abstracted
             # gh_switcher_is_gh_available() && gh_switcher_get_current_user()
             if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
                 local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
                 if [[ "$username" == "$current_user" ]]; then
-                    echo "  🟢 $i. $username (current)"
+                    echo "  🟢 $i. $username (current)$ssh_status"
                 else
-                    echo "  ⚪ $i. $username"
+                    echo "  ⚪ $i. $username$ssh_status"
                 fi
             else
-                echo "  ⚪ $i. $username"
+                echo "  ⚪ $i. $username$ssh_status"
             fi
             ((i++))
         fi
@@ -210,8 +259,8 @@ list_users() {
     # LIBRARY NOTE: Would return structured data instead of printing:
     # {
     #   "users": [
-    #     {"id": 1, "username": "personal-acct", "is_current": true},
-    #     {"id": 2, "username": "work-account", "is_current": false}
+    #     {"id": 1, "username": "personal-acct", "is_current": true, "ssh_key": null},
+    #     {"id": 2, "username": "work-account", "is_current": false, "ssh_key": "~/.ssh/id_rsa_work"}
     #   ],
     #   "current_user": "personal-acct",
     #   "gh_available": true
@@ -294,6 +343,180 @@ detect_git_config() {
     return 0
 }
 
+# Helper function to validate SSH key file and fix permissions
+#
+# TEST NOTES:
+# - Test with ed25519 keys: ~/.ssh/id_ed25519
+# - Test with RSA keys: ~/.ssh/id_rsa  
+# - Test with missing files: ~/.ssh/nonexistent
+# - Test with wrong permissions: chmod 644, 755, 777
+# - Test with directories instead of files
+# - Test with non-readable files (permission denied)
+validate_ssh_key() {
+    local ssh_key_path="$1"
+    local fix_permissions="${2:-true}"  # Whether to auto-fix permissions
+    
+    if [[ -z "$ssh_key_path" ]]; then
+        return 0  # Empty path is valid (means no SSH key)
+    fi
+    
+    # Expand ~ to home directory
+    ssh_key_path="${ssh_key_path/#~/$HOME}"
+    
+    # Security: Prevent directory traversal attacks
+    if [[ "$ssh_key_path" == *".."* ]]; then
+        echo "❌ Invalid SSH key path (directory traversal detected)"
+        return 1
+    fi
+    
+    # Check if file exists
+    if [[ ! -f "$ssh_key_path" ]]; then
+        echo "❌ SSH key not found: $ssh_key_path"
+        echo "💡 Options:"
+        echo "   1. Create SSH key: ssh-keygen -t ed25519 -f $ssh_key_path"
+        echo "   2. Add user without SSH key (will use HTTPS)"
+        return 1
+    fi
+    
+    # Check if file is readable
+    if [[ ! -r "$ssh_key_path" ]]; then
+        echo "❌ SSH key not readable: $ssh_key_path"
+        return 1
+    fi
+    
+    # Check file permissions (should be 600)
+    local perms=$(stat -c %a "$ssh_key_path" 2>/dev/null || stat -f %Lp "$ssh_key_path" 2>/dev/null)
+    if [[ "$perms" != "600" ]]; then
+        if [[ "$fix_permissions" == "true" ]]; then
+            echo "⚠️  SSH key has incorrect permissions ($perms)"
+            echo "🔧 Fixing permissions to 600..."
+            if chmod 600 "$ssh_key_path" 2>/dev/null; then
+                echo "✅ Set permissions to 600"
+            else
+                echo "❌ Failed to fix permissions"
+                return 1
+            fi
+        else
+            echo "⚠️  SSH key has incorrect permissions ($perms), should be 600"
+            return 1
+        fi
+    fi
+    
+    # Basic file format validation (check if it looks like a private key)
+    if ! grep -q "BEGIN.*PRIVATE KEY" "$ssh_key_path" 2>/dev/null; then
+        echo "⚠️  SSH key file doesn't appear to be a private key"
+        echo "   Make sure you're using the private key (not .pub file)"
+    fi
+    
+    return 0
+}
+
+# Helper function to test SSH authentication with GitHub
+#
+# TEST NOTES:
+# - Test with properly configured SSH key (added to GitHub)
+# - Test with SSH key not added to GitHub
+# - Test with invalid SSH key format
+# - Test with network connectivity issues
+# - Test with different GitHub endpoints (github.com, enterprise)
+test_ssh_auth() {
+    local ssh_key_path="$1"
+    
+    if [[ -z "$ssh_key_path" ]]; then
+        return 1
+    fi
+    
+    # Expand ~ to home directory
+    ssh_key_path="${ssh_key_path/#~/$HOME}"
+    
+    echo "🔐 Testing GitHub authentication with SSH key..."
+    
+    # Test SSH connection to GitHub with specific key
+    local ssh_output
+    ssh_output=$(ssh -i "$ssh_key_path" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 -T git@github.com 2>&1)
+    local ssh_result=$?
+    
+    # GitHub SSH returns 1 for successful authentication, 255 for failures
+    if [[ $ssh_result -eq 1 ]]; then
+        # Extract username from SSH output
+        local github_username=$(echo "$ssh_output" | grep -o "Hi [^!]*" | cut -d' ' -f2)
+        if [[ -n "$github_username" ]]; then
+            echo "✅ SSH key authenticated as: $github_username"
+            echo "$github_username"  # Return username for caller
+            return 0
+        else
+            echo "✅ SSH key authenticated (username detection failed)"
+            return 0
+        fi
+    else
+        echo "❌ SSH key authentication failed"
+        echo "💡 Ensure key is added to GitHub: https://github.com/settings/keys"
+        echo "   SSH output: $ssh_output"
+        return 1
+    fi
+}
+
+# Helper function to apply SSH configuration to git
+#
+# TEST NOTES:
+# - Test in git repository vs outside repository (local vs global config)
+# - Test with valid SSH keys
+# - Test removing SSH config (empty path)
+# - Test with git not available
+# - Test with malformed SSH key paths
+apply_ssh_config() {
+    local ssh_key_path="$1"
+    local scope="${2:-local}"  # 'local' or 'global'
+    
+    # Check git availability
+    if ! check_git_availability; then
+        echo "❌ Git is not available or not working"
+        return 1
+    fi
+    
+    # Validate scope
+    if [[ "$scope" != "local" && "$scope" != "global" ]]; then
+        echo "❌ Invalid scope: $scope (must be 'local' or 'global')"
+        return 1
+    fi
+    
+    local git_flags=""
+    if [[ "$scope" == "global" ]]; then
+        git_flags="--global"
+    else
+        git_flags="--local"
+        
+        # Check if we're in a git repository for local config
+        if ! git rev-parse --git-dir >/dev/null 2>&1; then
+            echo "❌ Not in a git repository (required for local config)"
+            return 1
+        fi
+    fi
+    
+    # Remove SSH configuration if no key provided
+    if [[ -z "$ssh_key_path" ]]; then
+        if git config $git_flags --unset core.sshCommand 2>/dev/null; then
+            echo "✅ Removed SSH configuration (will use HTTPS or default SSH)"
+        fi
+        return 0
+    fi
+    
+    # Expand ~ to home directory
+    ssh_key_path="${ssh_key_path/#~/$HOME}"
+    
+    # Security: Proper quoting to prevent command injection
+    local ssh_command="ssh -i '$ssh_key_path' -o IdentitiesOnly=yes"
+    
+    # Apply SSH configuration
+    if git config $git_flags core.sshCommand "$ssh_command" 2>/dev/null; then
+        echo "🔐 Configured SSH key: $ssh_key_path"
+        return 0
+    else
+        echo "❌ Failed to configure SSH key"
+        return 1
+    fi
+}
+
 # Helper function to validate input for profile creation
 validate_profile_input() {
     local username="$1"
@@ -355,19 +578,38 @@ decode_profile_value() {
 }
 
 # Helper function to write profile safely
+#
+# TEST NOTES:
+# - Test with valid SSH key paths
+# - Test with empty SSH key paths (HTTPS mode)
+# - Test with invalid SSH key paths  
+# - Test profile updates (overwriting existing profiles)
+# - Test with special characters in paths
 write_profile_entry() {
     local username="$1"
     local name="$2"
     local email="$3"
+    local ssh_key_path="$4"  # Optional SSH key path
     
     # Validate inputs
     if ! validate_profile_input "$username" "$name" "$email"; then
         return 1
     fi
     
+    # Validate SSH key if provided
+    if [[ -n "$ssh_key_path" ]]; then
+        if ! validate_ssh_key "$ssh_key_path"; then
+            return 1
+        fi
+    fi
+    
     # Encode values safely
     local encoded_name=$(encode_profile_value "$name")
     local encoded_email=$(encode_profile_value "$email")
+    local encoded_ssh_key=""
+    if [[ -n "$ssh_key_path" ]]; then
+        encoded_ssh_key=$(encode_profile_value "$ssh_key_path")
+    fi
     
     if [[ -z "$encoded_name" || -z "$encoded_email" ]]; then
         echo "❌ Failed to encode profile data"
@@ -398,8 +640,13 @@ write_profile_entry() {
         touch "${GH_USER_PROFILES}.tmp"
     fi
     
-    # Add new profile (format: username:version:base64(name):base64(email))
-    echo "$username:1:$encoded_name:$encoded_email" >> "${GH_USER_PROFILES}.tmp"
+    # Add new profile (format: username:version:base64(name):base64(email):base64(ssh_key))
+    # Version 2 includes SSH key support
+    if [[ -n "$encoded_ssh_key" ]]; then
+        echo "$username:2:$encoded_name:$encoded_email:$encoded_ssh_key" >> "${GH_USER_PROFILES}.tmp"
+    else
+        echo "$username:2:$encoded_name:$encoded_email:" >> "${GH_USER_PROFILES}.tmp"
+    fi
     
     # Atomic move
     if mv "${GH_USER_PROFILES}.tmp" "$GH_USER_PROFILES" 2>/dev/null; then
@@ -412,11 +659,19 @@ write_profile_entry() {
 }
 
 # Helper function to create a user profile (links GitHub username to git config)
+#
+# TEST NOTES:
+# - Test auto-capture with existing git config
+# - Test with provided SSH key paths
+# - Test with invalid SSH key paths
+# - Test SSH authentication during profile creation
+# - Test fallback to defaults when git config is empty
 create_user_profile() {
     local username="$1"
     local name="$2"
     local email="$3"
     local auto_capture="${4:-false}"  # Whether to auto-capture from current git config
+    local ssh_key_path="$5"  # Optional SSH key path
     
     if [[ -z "$username" ]]; then
         echo "❌ Username required for profile creation"
@@ -464,9 +719,37 @@ create_user_profile() {
         email="${username}@users.noreply.github.com"
     fi
     
+    # Test SSH authentication if SSH key provided
+    if [[ -n "$ssh_key_path" ]]; then
+        echo "🔍 Validating SSH key..."
+        if validate_ssh_key "$ssh_key_path"; then
+            # Test authentication and get username
+            local auth_username=$(test_ssh_auth "$ssh_key_path")
+            if [[ $? -eq 0 && -n "$auth_username" ]]; then
+                # SSH authentication successful
+                echo "✅ SSH key verified for GitHub user: $auth_username"
+                
+                # Warn if SSH username doesn't match provided username
+                if [[ "$auth_username" != "$username" ]]; then
+                    echo "⚠️  Warning: SSH key belongs to '$auth_username' but you specified '$username'"
+                    echo "   Continuing with '$username' as specified..."
+                fi
+            else
+                echo "⚠️  SSH authentication failed, but continuing with profile creation"
+                echo "   You can add the SSH key to GitHub later: https://github.com/settings/keys"
+            fi
+        else
+            return 1  # SSH validation failed
+        fi
+    fi
+    
     # Write the profile
-    if write_profile_entry "$username" "$name" "$email"; then
-        echo "✅ Created profile for $username: $name <$email>"
+    if write_profile_entry "$username" "$name" "$email" "$ssh_key_path"; then
+        if [[ -n "$ssh_key_path" ]]; then
+            echo "✅ Created profile for $username: $name <$email> [SSH: $ssh_key_path]"
+        else
+            echo "✅ Created profile for $username: $name <$email> [HTTPS]"
+        fi
         return 0
     else
         echo "❌ Failed to create profile for $username"
@@ -538,6 +821,13 @@ migrate_old_profile_format() {
 }
 
 # Helper function to get user profile (returns git config for a GitHub username)
+#
+# TEST NOTES:
+# - Test with version 1 profiles (no SSH key)
+# - Test with version 2 profiles (with SSH key)
+# - Test with old format profiles (username=name|email)
+# - Test with missing profiles
+# - Test with corrupted profile data
 get_user_profile() {
     local username="$1"
     
@@ -552,16 +842,35 @@ get_user_profile() {
     # Try migration if needed
     migrate_old_profile_format
     
-    # Look for new format first (username:version:name:email)
+    # Look for new format first (username:version:name:email:ssh_key)
     local profile_line=$(grep "^$username:" "$GH_USER_PROFILES" 2>/dev/null | head -1)
     
     if [[ -n "$profile_line" ]]; then
-        # New format: username:version:base64(name):base64(email)
         local version=$(echo "$profile_line" | cut -d':' -f2)
         local encoded_name=$(echo "$profile_line" | cut -d':' -f3)
         local encoded_email=$(echo "$profile_line" | cut -d':' -f4)
+        local encoded_ssh_key=$(echo "$profile_line" | cut -d':' -f5)
         
-        if [[ "$version" == "1" && -n "$encoded_name" && -n "$encoded_email" ]]; then
+        # Handle version 2 (with SSH key support)
+        if [[ "$version" == "2" && -n "$encoded_name" && -n "$encoded_email" ]]; then
+            local name=$(decode_profile_value "$encoded_name")
+            local email=$(decode_profile_value "$encoded_email")
+            local ssh_key_path=""
+            
+            if [[ -n "$encoded_ssh_key" ]]; then
+                ssh_key_path=$(decode_profile_value "$encoded_ssh_key")
+            fi
+            
+            if [[ -n "$name" && -n "$email" ]]; then
+                echo "name:$name"
+                echo "email:$email"
+                if [[ -n "$ssh_key_path" ]]; then
+                    echo "ssh_key:$ssh_key_path"
+                fi
+                return 0
+            fi
+        # Handle version 1 (without SSH key support)  
+        elif [[ "$version" == "1" && -n "$encoded_name" && -n "$encoded_email" ]]; then
             local name=$(decode_profile_value "$encoded_name")
             local email=$(decode_profile_value "$encoded_email")
             
@@ -590,6 +899,13 @@ get_user_profile() {
 }
 
 # Helper function to apply user profile (set git config from stored profile)
+#
+# TEST NOTES:
+# - Test applying profiles with SSH keys
+# - Test applying profiles without SSH keys (HTTPS)
+# - Test in git repository vs outside repository
+# - Test with invalid SSH keys in profile
+# - Test switching between different SSH keys
 apply_user_profile() {
     local username="$1"
     local scope="${2:-local}"  # 'local' or 'global'
@@ -607,18 +923,39 @@ apply_user_profile() {
     
     local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
     local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+    local ssh_key_path=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
     
     if [[ -z "$name" || -z "$email" ]]; then
         echo "❌ Invalid profile data for user: $username"
         return 1
     fi
     
-    if apply_git_config "$name" "$email" "$scope"; then
-        return 0
-    else
-        echo "❌ Failed to apply profile for user: $username"
+    # Apply git config first
+    if ! apply_git_config "$name" "$email" "$scope"; then
+        echo "❌ Failed to apply git config for user: $username"
         return 1
     fi
+    
+    # Apply SSH configuration if SSH key is configured
+    if [[ -n "$ssh_key_path" ]]; then
+        # Validate SSH key before applying (but don't fail if invalid - just warn)
+        if validate_ssh_key "$ssh_key_path" "false"; then
+            if apply_ssh_config "$ssh_key_path" "$scope"; then
+                echo "🔐 Applied SSH key: $ssh_key_path"
+            else
+                echo "⚠️  Failed to apply SSH configuration (continuing with git config only)"
+            fi
+        else
+            echo "⚠️  SSH key validation failed, using HTTPS instead"
+            # Remove any existing SSH config
+            apply_ssh_config "" "$scope" >/dev/null 2>&1
+        fi
+    else
+        # No SSH key configured, remove any existing SSH config
+        apply_ssh_config "" "$scope" >/dev/null 2>&1
+    fi
+    
+    return 0
 }
 
 # Helper function to apply git configuration with validation
@@ -838,7 +1175,9 @@ ghs() {
     
     case "$cmd" in
         "add-user")
-            add_user "$2"
+            # Pass all arguments after "add-user" to the function
+            shift  # Remove "add-user" command
+            add_user "$@"
             ;;
             
         "remove-user"|"rm-user")
@@ -861,36 +1200,34 @@ ghs() {
             # Try migration first
             migrate_old_profile_format
             
-            while IFS=':' read -r username version encoded_name encoded_email || IFS='=' read -r username old_profile; do
-                if [[ -n "$username" ]]; then
-                    local name=""
-                    local email=""
-                    
-                    # Handle new format (username:version:base64(name):base64(email))
-                    if [[ -n "$version" && -n "$encoded_name" && -n "$encoded_email" ]]; then
-                        name=$(decode_profile_value "$encoded_name")
-                        email=$(decode_profile_value "$encoded_email")
-                    # Handle old format fallback (username=name|email)
-                    elif [[ -n "$old_profile" ]]; then
-                        name=$(echo "$old_profile" | cut -d'|' -f1)
-                        email=$(echo "$old_profile" | cut -d'|' -f2)
-                    fi
-                    
-                    if [[ -n "$name" && -n "$email" ]]; then
-                        # Check if this is a configured user
-                        local user_id=""
-                        if [[ -f "$GH_USERS_CONFIG" ]]; then
-                            user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
-                        fi
-                        
-                        if [[ -n "$user_id" ]]; then
-                            echo "  🟢 $username (#$user_id): $name <$email>"
+            # Use get_user_profile to properly handle all formats including SSH keys
+            if [[ -f "$GH_USERS_CONFIG" ]]; then
+                local i=1
+                while IFS= read -r username; do
+                    if [[ -n "$username" ]]; then
+                        local profile=$(get_user_profile "$username")
+                        if [[ $? -eq 0 ]]; then
+                            local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
+                            local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+                            local ssh_key_path=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
+                            
+                            local ssh_display=""
+                            if [[ -n "$ssh_key_path" ]]; then
+                                ssh_display=" [SSH: $ssh_key_path]"
+                            else
+                                ssh_display=" [HTTPS]"
+                            fi
+                            
+                            echo "  🟢 $username (#$i): $name <$email>$ssh_display"
                         else
-                            echo "  ⚪ $username: $name <$email>"
+                            echo "  ⚪ $username (#$i): No profile configured"
                         fi
+                        ((i++))
                     fi
-                fi
-            done < "$GH_USER_PROFILES"
+                done < "$GH_USERS_CONFIG"
+            else
+                echo "   No users configured"
+            fi
             ;;
             
         "update-profile")
@@ -1144,30 +1481,37 @@ ghs() {
             # Show help
             echo "🎯 GitHub Project Switcher (ghs)"
             echo ""
-            echo "Global GitHub account switching with numbered users and project memory."
+            echo "Global GitHub account switching with numbered users, project memory, and SSH key management."
             echo ""
             echo "INSTALLATION:"
             echo "  ghs install                Install to shell profile (auto-detects zsh/bash)"
             echo "  ghs uninstall              Remove from shell profile"
             echo ""
             echo "SETUP:"
-            echo "  ghs add-user <username>    Add a user to the numbered list"
-            echo "  ghs add-user current       Add currently authenticated GitHub user"
+            echo "  ghs add-user <username>                    Add a user (HTTPS mode)"
+            echo "  ghs add-user <username> --ssh-key <path>   Add a user with SSH key"
+            echo "  ghs add-user current                       Add currently authenticated user"
             echo ""
             echo "DAILY WORKFLOW:"
             echo "  ghs                        Show smart dashboard"
-            echo "  ghs switch <number>        Switch to user by number"
+            echo "  ghs switch <number>        Switch to user by number (applies SSH config)"
             echo "  ghs assign <number>        Assign user as project default"
             echo ""
             echo "USER MANAGEMENT:"
-            echo "  ghs users                  Show numbered list of users"
+            echo "  ghs users                  Show numbered list of users with SSH status"
             echo "  ghs remove-user <user>     Remove user by name or number"
-            echo "  ghs profiles               Show user git config profiles"
+            echo "  ghs profiles               Show user git config profiles with SSH keys"
             echo "  ghs update-profile <user>  Update git config profile"
             echo ""
             echo "PROJECT & STATUS:"
             echo "  ghs status                 Show detailed current status"
             echo "  ghs list                   List all configured projects"
+            echo ""
+            echo "SSH KEY FEATURES:"
+            echo "  • Automatic SSH key validation and permission fixing"
+            echo "  • GitHub authentication testing during setup"
+            echo "  • Per-profile SSH configuration (no manual ~/.ssh/config editing)"
+            echo "  • Seamless switching between SSH and HTTPS authentication"
             ;;
             
         *)
@@ -1225,7 +1569,7 @@ ghs() {
                 if [[ "$user_in_list" == true ]]; then
                     echo "🔑 Current user: $current_user (#$current_user_id)"
                     
-                    # Show git config status
+                    # Show git config and SSH status
                     local profile=$(get_user_profile "$current_user")
                     if [[ $? -eq 0 ]]; then
                         local current_git_config=$(detect_git_config "auto")
@@ -1235,6 +1579,7 @@ ghs() {
                             
                             local profile_name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
                             local profile_email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+                            local ssh_key_path=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
                             
                             if [[ -n "$current_git_name" && -n "$current_git_email" ]]; then
                                 if [[ "$current_git_name" == "$profile_name" && "$current_git_email" == "$profile_email" ]]; then
@@ -1244,6 +1589,22 @@ ghs() {
                                 fi
                             else
                                 echo "🔧 Git config: ❌ not configured"
+                            fi
+                            
+                            # Show SSH status
+                            if [[ -n "$ssh_key_path" ]]; then
+                                if [[ -f "${ssh_key_path/#~/$HOME}" ]]; then
+                                    local current_ssh_cmd=$(git config --get core.sshCommand 2>/dev/null || echo "")
+                                    if [[ "$current_ssh_cmd" == *"$ssh_key_path"* ]]; then
+                                        echo "🔐 SSH config: ✅ using $ssh_key_path"
+                                    else
+                                        echo "🔐 SSH config: ⚠️  not configured for $ssh_key_path"
+                                    fi
+                                else
+                                    echo "🔐 SSH config: ❌ key not found: $ssh_key_path"
+                                fi
+                            else
+                                echo "🔐 SSH config: 🌐 using HTTPS"
                             fi
                         else
                             echo "🔧 Git config: ❌ git not available"
