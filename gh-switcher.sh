@@ -106,6 +106,7 @@
 GH_PROJECT_CONFIG="$HOME/.gh-project-accounts"
 GH_USERS_CONFIG="$HOME/.gh-users"
 GH_USER_PROFILES="$HOME/.gh-user-profiles"
+GH_DIRECTORY_LINKS="$HOME/.gh-directory-links"
 
 # NOTE: For library version, these would become:
 # GH_PROJECT_CONFIG="$GH_SWITCHER_DIR/$GH_SWITCHER_NAMESPACE/projects"  
@@ -811,6 +812,506 @@ remove_user() {
     list_users
 }
 
+# Directory auto-switching functionality
+#
+# Link a directory to a specific profile
+link_directory() {
+    local user_input="$1"
+    local directory="${2:-$(pwd)}"
+    local auto_switch_mode="${3:-ask}"
+    
+    if [[ -z "$user_input" ]]; then
+        echo "❌ Usage: ghs link <user_number_or_name> [directory] [auto_switch_mode]"
+        echo "   Auto-switch modes: always, ask, never"
+        return 1
+    fi
+    
+    # Validate auto-switch mode
+    if [[ "$auto_switch_mode" != "always" && "$auto_switch_mode" != "ask" && "$auto_switch_mode" != "never" ]]; then
+        echo "❌ Invalid auto-switch mode: $auto_switch_mode"
+        echo "   Valid modes: always, ask, never"
+        return 1
+    fi
+    
+    # Get username from input (number or name)
+    local username=""
+    local user_id=""
+    if [[ "$user_input" =~ ^[0-9]+$ ]]; then
+        username=$(get_user_by_id "$user_input")
+        if [[ $? -ne 0 ]]; then
+            return 1
+        fi
+        user_id="$user_input"
+    else
+        username="$user_input"
+        # Find user ID for display
+        if [[ -f "$GH_USERS_CONFIG" ]]; then
+            user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
+        fi
+    fi
+    
+    # Validate user exists
+    if [[ ! -f "$GH_USERS_CONFIG" ]] || ! grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
+        echo "❌ User $username not found in user list"
+        echo "   Use 'ghs add-user $username' to add them first"
+        return 1
+    fi
+    
+    # Normalize directory path
+    local normalized_dir=$(realpath "$directory" 2>/dev/null || echo "$directory")
+    
+    echo "🔗 Linking directory to profile..."
+    echo "📁 Directory: $normalized_dir"
+    if [[ -n "$user_id" ]]; then
+        echo "👤 Profile: $username (#$user_id)"
+    else
+        echo "👤 Profile: $username"
+    fi
+    echo "⚙️  Auto-switch: $auto_switch_mode"
+    
+    # Create directory links file if it doesn't exist
+    touch "$GH_DIRECTORY_LINKS"
+    
+    # Remove existing entry for this directory
+    if [[ -f "$GH_DIRECTORY_LINKS" ]]; then
+        grep -v "^$(echo "$normalized_dir" | sed 's/[[\.*^$()+?{|]/\\&/g'):" "$GH_DIRECTORY_LINKS" > "${GH_DIRECTORY_LINKS}.tmp" 2>/dev/null || true
+    else
+        touch "${GH_DIRECTORY_LINKS}.tmp"
+    fi
+    
+    # Add new entry (format: path:user_id:auto_switch_mode)
+    echo "$normalized_dir:$username:$auto_switch_mode" >> "${GH_DIRECTORY_LINKS}.tmp"
+    
+    # Atomic move
+    if mv "${GH_DIRECTORY_LINKS}.tmp" "$GH_DIRECTORY_LINKS" 2>/dev/null; then
+        echo "✅ Directory linked successfully"
+        echo ""
+        echo "💡 This link will:"
+        echo "   - Auto-suggest $username when you enter this directory"
+        echo "   - Apply to all subdirectories (unless overridden)"
+        return 0
+    else
+        echo "❌ Failed to update directory links file"
+        rm -f "${GH_DIRECTORY_LINKS}.tmp" 2>/dev/null
+        return 1
+    fi
+}
+
+# Remove directory link
+unlink_directory() {
+    local directory="${1:-$(pwd)}"
+    
+    # Normalize directory path
+    local normalized_dir=$(realpath "$directory" 2>/dev/null || echo "$directory")
+    
+    if [[ ! -f "$GH_DIRECTORY_LINKS" ]]; then
+        echo "📁 No directory links configured"
+        return 0
+    fi
+    
+    # Check if directory has a direct link
+    local direct_link=$(grep "^$(echo "$normalized_dir" | sed 's/[[\.*^$()+?{|]/\\&/g'):" "$GH_DIRECTORY_LINKS" 2>/dev/null)
+    
+    if [[ -n "$direct_link" ]]; then
+        # Remove the direct link
+        grep -v "^$(echo "$normalized_dir" | sed 's/[[\.*^$()+?{|]/\\&/g'):" "$GH_DIRECTORY_LINKS" > "${GH_DIRECTORY_LINKS}.tmp" 2>/dev/null || true
+        mv "${GH_DIRECTORY_LINKS}.tmp" "$GH_DIRECTORY_LINKS"
+        echo "✅ Removed link for directory: $normalized_dir"
+    else
+        echo "📁 No direct link found for directory: $normalized_dir"
+        echo "💡 Check inherited links with: ghs links"
+    fi
+}
+
+# Find the most specific directory link for current directory
+find_directory_link() {
+    local directory="${1:-$(pwd)}"
+    
+    if [[ ! -f "$GH_DIRECTORY_LINKS" || ! -s "$GH_DIRECTORY_LINKS" ]]; then
+        return 1
+    fi
+    
+    # Normalize directory path
+    local normalized_dir=$(realpath "$directory" 2>/dev/null || echo "$directory")
+    
+    local best_match=""
+    local best_match_length=0
+    
+    # Find longest matching path (most specific)
+    while IFS=':' read -r link_path username auto_switch_mode; do
+        if [[ -n "$link_path" && -n "$username" ]]; then
+            # Handle wildcards
+            if [[ "$link_path" == *"*" ]]; then
+                local pattern="${link_path%\*}"
+                if [[ "$normalized_dir" == "$pattern"* ]]; then
+                    local match_length=${#pattern}
+                    if [[ $match_length -gt $best_match_length ]]; then
+                        best_match="$link_path:$username:$auto_switch_mode"
+                        best_match_length=$match_length
+                    fi
+                fi
+            else
+                # Exact match or subdirectory
+                if [[ "$normalized_dir" == "$link_path" || "$normalized_dir" == "$link_path"/* ]]; then
+                    local match_length=${#link_path}
+                    if [[ $match_length -gt $best_match_length ]]; then
+                        best_match="$link_path:$username:$auto_switch_mode"
+                        best_match_length=$match_length
+                    fi
+                fi
+            fi
+        fi
+    done < "$GH_DIRECTORY_LINKS"
+    
+    if [[ -n "$best_match" ]]; then
+        echo "$best_match"
+        return 0
+    fi
+    
+    return 1
+}
+
+# Check directory and handle auto-switching
+check_directory_link() {
+    local silent="${1:-false}"
+    local directory="${2:-$(pwd)}"
+    
+    # Find applicable directory link
+    local link_info=$(find_directory_link "$directory")
+    if [[ $? -ne 0 ]]; then
+        # No link found - check for smart repository detection
+        detect_repository_suggestion "$directory" "$silent"
+        return $?
+    fi
+    
+    # Parse link info
+    local link_path=$(echo "$link_info" | cut -d':' -f1)
+    local username=$(echo "$link_info" | cut -d':' -f2)
+    local auto_switch_mode=$(echo "$link_info" | cut -d':' -f3)
+    
+    # Get current user
+    local current_user=""
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
+    fi
+    
+    # Check if already using correct user
+    if [[ "$current_user" == "$username" ]]; then
+        return 0  # Already correct
+    fi
+    
+    # Handle auto-switch behavior
+    case "$auto_switch_mode" in
+        "always")
+            if [[ "$silent" == "false" ]]; then
+                echo "🔄 Auto-switching to $username for this directory..."
+            fi
+            switch_to_user "$username"
+            return $?
+            ;;
+        "never")
+            return 0  # Do nothing
+            ;;
+        "ask"|*)
+            if [[ "$silent" == "false" ]]; then
+                prompt_auto_switch "$username" "$current_user" "$directory"
+            fi
+            return 0
+            ;;
+    esac
+}
+
+# Prompt user for auto-switching
+prompt_auto_switch() {
+    local suggested_user="$1"
+    local current_user="$2"
+    local directory="$3"
+    
+    # Find user ID for display
+    local user_id=""
+    if [[ -f "$GH_USERS_CONFIG" ]]; then
+        user_id=$(grep -n "^$suggested_user$" "$GH_USERS_CONFIG" | cut -d: -f1)
+    fi
+    
+    echo ""
+    echo "⚠️  Profile mismatch detected!"
+    echo "📁 Directory: $(basename "$directory")"
+    echo "🔑 Current user: ${current_user:-not authenticated}"
+    if [[ -n "$user_id" ]]; then
+        echo "🔗 Directory profile: $suggested_user (#$user_id)"
+    else
+        echo "🔗 Directory profile: $suggested_user"
+    fi
+    echo ""
+    echo "💡 Auto-switch suggestion:"
+    echo "   This directory is linked to $suggested_user"
+    echo ""
+    
+    read -p "Switch now? (y/n/always/never): " choice
+    case "$choice" in
+        y|Y|yes|Yes)
+            switch_to_user "$suggested_user"
+            ;;
+        always|Always|a|A)
+            # Update link to always auto-switch
+            update_directory_link_mode "$(pwd)" "always"
+            switch_to_user "$suggested_user"
+            ;;
+        never|Never|n|N|no|No)
+            if [[ "$choice" == "never" || "$choice" == "Never" ]]; then
+                # Update link to never auto-switch
+                update_directory_link_mode "$(pwd)" "never"
+            fi
+            echo "💡 Continuing with current user"
+            ;;
+        *)
+            echo "💡 Continuing with current user"
+            ;;
+    esac
+}
+
+# Update auto-switch mode for a directory
+update_directory_link_mode() {
+    local directory="$1"
+    local new_mode="$2"
+    
+    local normalized_dir=$(realpath "$directory" 2>/dev/null || echo "$directory")
+    
+    if [[ ! -f "$GH_DIRECTORY_LINKS" ]]; then
+        return 1
+    fi
+    
+    # Find and update the entry
+    local temp_file="${GH_DIRECTORY_LINKS}.tmp"
+    > "$temp_file"
+    
+    local found=false
+    while IFS=':' read -r link_path username auto_switch_mode; do
+        if [[ "$link_path" == "$normalized_dir" ]]; then
+            echo "$link_path:$username:$new_mode" >> "$temp_file"
+            found=true
+        else
+            echo "$link_path:$username:$auto_switch_mode" >> "$temp_file"
+        fi
+    done < "$GH_DIRECTORY_LINKS"
+    
+    if [[ "$found" == "true" ]]; then
+        mv "$temp_file" "$GH_DIRECTORY_LINKS"
+        echo "✅ Updated auto-switch mode to: $new_mode"
+    else
+        rm -f "$temp_file"
+        echo "❌ Directory link not found"
+    fi
+}
+
+# Switch to a user (internal function)
+switch_to_user() {
+    local username="$1"
+    
+    # Find user ID
+    local user_id=""
+    if [[ -f "$GH_USERS_CONFIG" ]]; then
+        user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
+    fi
+    
+    if [[ -n "$user_id" ]]; then
+        # Use existing switch logic
+        if gh auth switch --user "$username" 2>/dev/null; then
+            echo "✅ Switched to $username (#$user_id)"
+            
+            # Apply git config profile
+            local profile=$(get_user_profile "$username")
+            if [[ $? -eq 0 ]]; then
+                if apply_user_profile "$username" "local"; then
+                    local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
+                    local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+                    echo "🔧 Applied git config: $name <$email>"
+                fi
+            fi
+            return 0
+        else
+            echo "❌ Failed to switch to $username"
+            return 1
+        fi
+    else
+        echo "❌ User $username not found in user list"
+        return 1
+    fi
+}
+
+# Smart repository detection and suggestions
+detect_repository_suggestion() {
+    local directory="${1:-$(pwd)}"
+    local silent="${2:-false}"
+    
+    # Check if we're in a git repository
+    if ! git -C "$directory" rev-parse --git-dir >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Get remote URLs
+    local remotes=$(git -C "$directory" remote -v 2>/dev/null | grep fetch | head -3)
+    if [[ -z "$remotes" ]]; then
+        return 1
+    fi
+    
+    # Extract GitHub organizations/users from remotes
+    local github_orgs=()
+    while IFS= read -r remote_line; do
+        if [[ "$remote_line" =~ github\.com[:/]([^/]+)/ ]]; then
+            local org="${BASH_REMATCH[1]}"
+            if [[ ! " ${github_orgs[@]} " =~ " $org " ]]; then
+                github_orgs+=("$org")
+            fi
+        fi
+    done <<< "$remotes"
+    
+    if [[ ${#github_orgs[@]} -eq 0 ]]; then
+        return 1
+    fi
+    
+    # Check if any of our configured users match the organizations
+    if [[ ! -f "$GH_USERS_CONFIG" ]]; then
+        return 1
+    fi
+    
+    local suggested_users=()
+    for org in "${github_orgs[@]}"; do
+        if grep -q "^$org$" "$GH_USERS_CONFIG" 2>/dev/null; then
+            suggested_users+=("$org")
+        else
+            # Check if org appears in any configured username
+            while IFS= read -r username; do
+                if [[ -n "$username" && "$username" == *"$org"* ]]; then
+                    suggested_users+=("$username")
+                fi
+            done < "$GH_USERS_CONFIG"
+        fi
+    done
+    
+    if [[ ${#suggested_users[@]} -eq 0 ]]; then
+        return 1
+    fi
+    
+    if [[ "$silent" == "false" ]]; then
+        echo ""
+        echo "💡 Smart suggestion:"
+        echo "   This appears to be a ${github_orgs[0]} repository"
+        echo "   Recommended profile: ${suggested_users[0]}"
+        echo ""
+        read -p "Link this directory? (y/n): " choice
+        if [[ "$choice" =~ ^[yY] ]]; then
+            link_directory "${suggested_users[0]}" "$directory" "ask"
+        fi
+    fi
+    
+    return 0
+}
+
+# List all directory links
+list_directory_links() {
+    if [[ ! -f "$GH_DIRECTORY_LINKS" || ! -s "$GH_DIRECTORY_LINKS" ]]; then
+        echo "📁 No directory links configured yet"
+        echo "   Use 'ghs link <profile>' to link directories"
+        return 0
+    fi
+    
+    echo "📁 Directory Profile Links:"
+    echo ""
+    
+    while IFS=':' read -r link_path username auto_switch_mode; do
+        if [[ -n "$link_path" && -n "$username" ]]; then
+            # Find user ID for display
+            local user_id=""
+            if [[ -f "$GH_USERS_CONFIG" ]]; then
+                user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
+            fi
+            
+            local user_display="$username"
+            if [[ -n "$user_id" ]]; then
+                user_display="$username (#$user_id)"
+            fi
+            
+            echo "$link_path → $user_display [auto-switch: $auto_switch_mode]"
+        fi
+    done < "$GH_DIRECTORY_LINKS"
+    
+    echo ""
+    echo "💡 Commands:"
+    echo "   ghs link <profile>         # Link current directory"
+    echo "   ghs unlink                 # Remove current directory link"
+    echo "   ghs check-directory        # Check current directory for links"
+}
+
+# Install cd hook for shell integration
+install_cd_hook() {
+    local shell_type="${1:-auto}"
+    
+    # Auto-detect shell if not specified
+    if [[ "$shell_type" == "auto" ]]; then
+        if [[ "$SHELL" == *"zsh"* ]] || [[ -n "$ZSH_VERSION" ]]; then
+            shell_type="zsh"
+        elif [[ "$SHELL" == *"bash"* ]] || [[ -n "$BASH_VERSION" ]]; then
+            shell_type="bash"
+        elif [[ "$SHELL" == *"fish"* ]]; then
+            shell_type="fish"
+        else
+            echo "❌ Unsupported shell: $SHELL"
+            echo "   Supported shells: bash, zsh, fish"
+            return 1
+        fi
+    fi
+    
+    local shell_config=""
+    local hook_code=""
+    
+    case "$shell_type" in
+        bash)
+            shell_config="$HOME/.bashrc"
+            hook_code='function cd() { builtin cd "$@" && ghs check-directory --silent; }'
+            ;;
+        zsh)
+            shell_config="$HOME/.zshrc"
+            hook_code='function cd() { builtin cd "$@" && ghs check-directory --silent; }'
+            ;;
+        fish)
+            shell_config="$HOME/.config/fish/config.fish"
+            hook_code='function cd; builtin cd $argv; and ghs check-directory --silent; end'
+            ;;
+        *)
+            echo "❌ Unsupported shell: $shell_type"
+            return 1
+            ;;
+    esac
+    
+    # Check if hook is already installed
+    if [[ -f "$shell_config" ]] && grep -q "ghs check-directory" "$shell_config" 2>/dev/null; then
+        echo "✅ Directory auto-switching hook is already installed in $shell_config"
+        return 0
+    fi
+    
+    # Create config directory if needed (for fish)
+    local config_dir=$(dirname "$shell_config")
+    if [[ ! -d "$config_dir" ]]; then
+        mkdir -p "$config_dir" 2>/dev/null
+        if [[ $? -ne 0 ]]; then
+            echo "❌ Failed to create config directory: $config_dir"
+            return 1
+        fi
+    fi
+    
+    # Add the hook
+    echo "" >> "$shell_config"
+    echo "# gh-switcher directory auto-switching hook" >> "$shell_config"
+    echo "$hook_code" >> "$shell_config"
+    
+    echo "✅ Installed directory auto-switching hook for $shell_type"
+    echo "   Config file: $shell_config"
+    echo "   Restart your terminal or run: source $shell_config"
+    echo ""
+    echo "💡 Now 'cd' will automatically check for directory profile links!"
+}
+
 # Simple GitHub project switcher function
 #
 # LIBRARY TRANSFORMATION NOTES:
@@ -1140,6 +1641,35 @@ ghs() {
             fi
             ;;
             
+        "link")
+            local user_input="$2"
+            local directory="${3:-$(pwd)}"
+            local auto_switch_mode="${4:-ask}"
+            link_directory "$user_input" "$directory" "$auto_switch_mode"
+            ;;
+            
+        "unlink")
+            local directory="${2:-$(pwd)}"
+            unlink_directory "$directory"
+            ;;
+            
+        "links")
+            list_directory_links
+            ;;
+            
+        "check-directory")
+            local silent=false
+            if [[ "$2" == "--silent" ]]; then
+                silent=true
+            fi
+            check_directory_link "$silent"
+            ;;
+            
+        "install-cd-hook")
+            local shell_type="${2:-auto}"
+            install_cd_hook "$shell_type"
+            ;;
+
         "help"|"-h"|"--help")
             # Show help
             echo "🎯 GitHub Project Switcher (ghs)"
@@ -1149,6 +1679,7 @@ ghs() {
             echo "INSTALLATION:"
             echo "  ghs install                Install to shell profile (auto-detects zsh/bash)"
             echo "  ghs uninstall              Remove from shell profile"
+            echo "  ghs install-cd-hook        Install directory auto-switching (cd hook)"
             echo ""
             echo "SETUP:"
             echo "  ghs add-user <username>    Add a user to the numbered list"
@@ -1158,6 +1689,12 @@ ghs() {
             echo "  ghs                        Show smart dashboard"
             echo "  ghs switch <number>        Switch to user by number"
             echo "  ghs assign <number>        Assign user as project default"
+            echo ""
+            echo "DIRECTORY AUTO-SWITCHING:"
+            echo "  ghs link <number>          Link current directory to a profile"
+            echo "  ghs unlink                 Remove directory link"
+            echo "  ghs links                  Show all directory links"
+            echo "  ghs check-directory        Check current directory for profile links"
             echo ""
             echo "USER MANAGEMENT:"
             echo "  ghs users                  Show numbered list of users"
@@ -1285,6 +1822,40 @@ ghs() {
                     fi
                 else
                     echo "💡 No account configured for this project"
+                fi
+                
+                # Show directory link information
+                local link_info=$(find_directory_link "$(pwd)")
+                if [[ $? -eq 0 ]]; then
+                    local link_username=$(echo "$link_info" | cut -d':' -f2)
+                    local link_mode=$(echo "$link_info" | cut -d':' -f3)
+                    local link_user_id=""
+                    if [[ -f "$GH_USERS_CONFIG" ]]; then
+                        link_user_id=$(grep -n "^$link_username$" "$GH_USERS_CONFIG" | cut -d: -f1)
+                    fi
+                    
+                    local link_display="$link_username"
+                    if [[ -n "$link_user_id" ]]; then
+                        link_display="$link_username (#$link_user_id)"
+                    fi
+                    
+                    if [[ "$current_user" == "$link_username" ]]; then
+                        echo "🔗 Directory linked to: $link_display ✅"
+                    else
+                        echo "🔗 Directory linked to: $link_display [mode: $link_mode]"
+                    fi
+                else
+                    # Check for smart suggestion
+                    if git rev-parse --git-dir >/dev/null 2>&1; then
+                        local remotes=$(git remote -v 2>/dev/null | grep fetch | head -1)
+                        if [[ "$remotes" =~ github\.com[:/]([^/]+)/ ]]; then
+                            local org="${BASH_REMATCH[1]}"
+                            if grep -q "^$org$" "$GH_USERS_CONFIG" 2>/dev/null; then
+                                echo "💡 Suggestion: Link this directory to $org"
+                                echo "   Run 'ghs link $org' to set up auto-switching"
+                            fi
+                        fi
+                    fi
                 fi
             else
                 echo "❌ GitHub CLI not authenticated or not installed"
