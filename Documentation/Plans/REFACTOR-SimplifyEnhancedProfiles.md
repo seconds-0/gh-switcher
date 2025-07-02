@@ -185,27 +185,68 @@ ghs profiles --detailed # Current rich display (for debugging)
 **Remove complex interactive editor:**
 ```bash
 # Remove entire interactive while loop (~80 lines)
-# Replace with simple field editing commands
+# Replace with simple field setting commands
 ```
 
-**New simple commands:**
+**New simple commands using established patterns:**
 ```bash
-ghs edit <user> name "John Smith"      # Set name
-ghs edit <user> email "john@email.com" # Set email  
-ghs edit <user> gpg "ABC123DEF456"     # Set GPG key
-ghs edit <user> gpg ""                 # Clear GPG key
+ghs set 1 name "John Smith"           # Set by user number (existing pattern)
+ghs set john-user email "john@email.com" # Set by username (existing pattern)  
+ghs set current name "John Smith"     # Set current user (new convenience)
+ghs set 2 gpg "ABC123DEF456"         # Set GPG key
+ghs set current gpg ""               # Clear GPG key for current user
+```
+
+**Pattern consistency with existing commands:**
+```bash
+# Existing numbered user pattern:
+ghs switch 1        → ghs set 1 name "John"
+ghs assign 2        → ghs set 2 email "john@email.com"  
+ghs validate 1      → ghs set 1 gpg "ABC123"
+
+# Existing username pattern:
+ghs switch john     → ghs set john name "John"
+ghs validate john   → ghs set john email "john@email.com"
+
+# New convenience pattern:
+ghs add-user current → ghs set current name "John"
 ```
 
 **Implementation:**
 ```bash
-edit_profile_field() {
-    local username="$1"
+set_profile_field() {
+    local user_input="$1"
     local field="$2" 
     local value="$3"
     
+    # Resolve user input to username (handle number, username, or "current")
+    local username=""
+    if [[ "$user_input" == "current" ]]; then
+        # Get current GitHub user
+        if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+            username=$(gh api user --jq '.login' 2>/dev/null || echo "")
+            if [[ -z "$username" ]]; then
+                echo "❌ Could not detect current GitHub user"
+                return 1
+            fi
+        else
+            echo "❌ GitHub CLI not authenticated"
+            return 1
+        fi
+    elif [[ "$user_input" =~ ^[0-9]+$ ]]; then
+        # User number
+        username=$(get_user_by_id "$user_input")
+        if [[ $? -ne 0 ]]; then
+            return 1
+        fi
+    else
+        # Username directly
+        username="$user_input"
+    fi
+    
     # Get current profile
     local profile=$(get_user_profile "$username")
-    [[ $? -ne 0 ]] && { echo "❌ No profile found"; return 1; }
+    [[ $? -ne 0 ]] && { echo "❌ No profile found for $username"; return 1; }
     
     # Extract current values
     local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
@@ -412,8 +453,8 @@ fi
 - [ ] Replace `display_rich_profile()` calls with simple version
 - [ ] Add `--detailed` flag for rich display
 - [ ] Remove interactive editor while loop (~80 lines)
-- [ ] Create `edit_profile_field()` function
-- [ ] Update `ghs edit` command to use field arguments
+- [ ] Create `set_profile_field()` function
+- [ ] Update `ghs set` command with number/username/current patterns
 - [ ] Simplify health check output and language
 - [ ] Remove medical metaphors from all functions
 - [ ] Test UX improvements
@@ -429,7 +470,7 @@ fi
 - [ ] Reduce emoji usage from 17 to 5 types
 - [ ] Replace all medical metaphors with neutral language
 - [ ] Simplify technical jargon in user-facing messages
-- [ ] Update help text to reflect simpler interface
+- [ ] Update help text to include `ghs set` command and patterns
 - [ ] Test final polish
 
 ### Verification Steps
@@ -446,7 +487,8 @@ fi
 - **Code reduction**: 500+ lines removed (23% reduction)
 - **Function size**: No function >40 lines (vs current 103-line max)
 - **Emoji reduction**: 17 → 5 types (70% reduction)
-- **Command simplification**: 1-step editing vs multi-step interactive
+- **Command simplification**: 1-step field setting vs multi-step interactive editor
+- **Pattern consistency**: `ghs set` aligns with existing numbered user system
 
 ### Qualitative Improvements  
 - **Simpler UX**: Less cognitive load, faster workflows
@@ -456,7 +498,9 @@ fi
 
 ### User Experience
 - **Faster daily workflows**: `ghs profiles` shows essential info quickly
-- **Scriptable editing**: `ghs edit user field value` works in scripts
+- **Scriptable field setting**: `ghs set user field value` works in scripts
+- **Convenient patterns**: `ghs set current name "John"` for logged-in user
+- **Consistent numbering**: `ghs set 1 email "john@email.com"` aligns with existing commands
 - **Optional complexity**: `--detailed` flag for power users
 - **Cleaner output**: Less noise, more signal
 
@@ -488,7 +532,7 @@ Not Started
 
 **User Input Required:**
 - Default simple vs detailed profile display preference
-- Specific field names for `ghs edit` command
+- Field names for `ghs set` command (name, email, gpg)
 - Migration timeline for existing users
 
 ## Questions/Uncertainties
@@ -506,3 +550,64 @@ Not Started
 This refactoring aligns with the project's core philosophy while preserving the valuable functionality delivered in FEAT-EnhancedProfileData. The goal is to make gh-switcher feel like a lightweight, focused tool rather than enterprise software.
 
 **Key Principle**: Remove complexity that doesn't serve daily workflows while keeping the power features accessible via flags/options.
+
+## Pattern Consistency Analysis
+
+### How User Reference Patterns Interact
+
+**Existing Established Patterns:**
+```bash
+# Numbered users (core pattern):
+ghs switch 1      # Switch to user #1
+ghs assign 2      # Assign user #2 to project  
+ghs validate 1    # Validate user #1
+
+# Username fallback:
+ghs switch john   # Switch to user "john"
+ghs assign work   # Assign user "work" to project
+ghs validate jane # Validate user "jane"
+
+# Special keywords:
+ghs add-user current  # Add currently authenticated user
+```
+
+**New Consistent Patterns:**
+```bash
+# Numbers (maintains consistency):
+ghs set 1 name "John Smith"     # Set field for user #1
+ghs set 2 email "jane@work.com" # Set field for user #2
+
+# Usernames (maintains consistency):  
+ghs set john name "John Smith"  # Set field for user "john"
+ghs set work email "work@co.com" # Set field for user "work"
+
+# Current keyword (new convenience):
+ghs set current name "John"     # Set field for logged-in user
+ghs set current gpg "ABC123"    # Convenient for daily use
+```
+
+### Benefits of This Pattern Design
+
+1. **Cognitive Consistency**: Same user reference works across all commands
+2. **Muscle Memory**: Numbers work the same everywhere (`1`, `2`, `3`)
+3. **Convenience Layer**: `current` reduces typing for common operations
+4. **Scriptability**: Reliable numeric references for automation
+5. **Flexibility**: Username fallback for human-readable scripts
+
+### Daily Workflow Examples
+
+```bash
+# Quick setup for current user:
+ghs set current name "Jane Developer"
+ghs set current email "jane@company.com"
+ghs set current gpg "ABC123DEF456"
+
+# Manage multiple profiles by number:
+ghs set 1 email "personal@gmail.com"   # Personal
+ghs set 2 email "work@company.com"     # Work  
+ghs set 3 email "client@startup.com"   # Client
+
+# Switch and verify:
+ghs switch 2
+ghs profiles  # See simple display
+```
