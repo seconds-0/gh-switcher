@@ -14,6 +14,17 @@
 #      echo "source $(realpath "$0")" >> ~/.zshrc
 #   2. Restart terminal or run: source ~/.zshrc
 #   3. Use 'ghs' command in your projects
+#
+# TESTING STRATEGY:
+# Comprehensive test comments are embedded throughout this codebase 
+# to guide future test implementation. See Documentation/Plans/TEST-ComprehensiveTestPlan.md
+# for complete testing requirements. Key areas requiring tests:
+# - File atomicity and data corruption protection
+# - Profile migration safety and backward compatibility  
+# - User workflow integration (add/switch/update commands)
+# - Input validation and security (injection resistance)
+# - Error handling and graceful failures
+# Total: 15+ test functions covering 100+ test cases
 
 #═══════════════════════════════════════════════════════════════════════════════
 # LIBRARY TRANSFORMATION NOTES
@@ -219,6 +230,15 @@ list_users() {
 }
 
 # Helper function to get username by ID number
+# TEST: test_get_user_by_id()
+# - Invalid input: non-numeric (should return 1, show error)
+# - Invalid input: negative number (should return 1)
+# - Missing config file (should return 1, show error)
+# - Empty config file (should return 1, show error) 
+# - User ID too high (ID=5 but only 3 users, should return 1)
+# - Valid ID=1 with users (should return 0, echo username)
+# - Valid ID=3 with 3 users (should return 0, echo username)
+# - Edge case: ID=0 (should return 1)
 get_user_by_id() {
     local user_id="$1"
     
@@ -242,6 +262,11 @@ get_user_by_id() {
 }
 
 # Helper function to check if git is available and working
+# TEST: test_check_git_availability()
+# - Mock git command to test not found case (should return 1)
+# - Mock git --version to fail (should return 1) 
+# - Normal case with working git (should return 0)
+# - Test in container without git installed
 check_git_availability() {
     if ! command -v git >/dev/null 2>&1; then
         return 1
@@ -358,6 +383,13 @@ detect_auto_sign() {
 
 
 # Helper function to validate GPG key
+# TEST: test_validate_gpg_key()
+# - Empty key (should return 0 - valid case)
+# - Missing gpg command (mock command -v to fail, should return 1)
+# - Invalid key ID (mock gpg --list-secret-keys to fail, should return 1)
+# - Valid key ID (mock gpg --list-secret-keys to succeed, should return 0)
+# - Special characters in key ID (test injection resistance)
+# - Very long key ID (test buffer limits)
 validate_gpg_key() {
     local gpg_key="$1"
     
@@ -435,6 +467,13 @@ validate_profile_input() {
 }
 
 # Helper function to encode profile data safely
+# TEST: test_encode_profile_value()
+# - Empty string (should return empty encoded string)
+# - Simple ASCII text (should return valid base64)
+# - Unicode characters (should handle UTF-8 properly)
+# - Special characters: newlines, quotes, spaces (should encode safely)
+# - Very long strings (test performance/limits)
+# - Binary data (should handle any input)
 encode_profile_value() {
     local value="$1"
     # Use base64 encoding to handle any special characters
@@ -442,6 +481,13 @@ encode_profile_value() {
 }
 
 # Helper function to decode profile data safely
+# TEST: test_decode_profile_value()
+# - Valid base64 input (should decode correctly)
+# - Invalid base64 input (should return empty string, not crash)
+# - Empty input (should return empty string)
+# - Malformed base64 (should fail gracefully)
+# - Round-trip test: encode→decode should equal original
+# - Test with all encode test cases to ensure reversibility
 decode_profile_value() {
     local encoded_value="$1"
     echo "$encoded_value" | base64 -d 2>/dev/null || echo ""
@@ -488,6 +534,14 @@ write_profile_entry() {
     fi
     
     # Atomic update with proper temp file handling
+    # TEST: test_write_profile_entry_atomicity()
+    # - Kill process during write (temp file should be cleaned up)
+    # - Concurrent writes (multiple processes, should not corrupt)
+    # - Disk full during write (should fail gracefully, not corrupt)
+    # - Permission denied on directory (should fail with clear message)
+    # - Existing profile update (should replace, not duplicate)
+    # - New profile creation (should add to file)
+    # - Invalid filesystem move (different filesystems, should fail safely)
     local temp_file="${GH_USER_PROFILES}.tmp.$$"
     
     # Set up cleanup trap for temp file
@@ -595,6 +649,17 @@ create_user_profile() {
 }
 
 # Helper function to migrate old profile format to new format
+# TEST: test_migrate_old_profile_format()
+# - Missing profile file (should return 0, no-op)
+# - New format file (should return 0, no changes)
+# - Old format v0 (username=name|email, should migrate to v1)
+# - Old format v2 with SSH/timestamps (should migrate to v2.1)
+# - Mixed format file (some old, some new, should migrate only old)
+# - Corrupted old format (should fail gracefully, keep backup)
+# - Permission denied during migration (should fail safely)
+# - Backup creation failure (should abort migration)
+# - Large file migration (test performance)
+# - Special characters in old format (should handle properly)
 migrate_old_profile_format() {
     if [[ ! -f "$GH_USER_PROFILES" ]]; then
         return 0
@@ -682,6 +747,15 @@ get_user_profile() {
             # TODO: Plan migration timeline for legacy format support
             # Current backward compatibility logic supports 4 different profile formats
             # Consider deprecation schedule: 6 months notice, then drop legacy support
+            # TEST: test_get_user_profile_backward_compatibility()
+            # - Version 0: username=name|email (should return structured data)
+            # - Version 1: username:1:base64(name):base64(email) (should return with defaults)
+            # - Version 2 old: username:2:name:email:gpg:ssh:auto:time (should ignore ssh/time)
+            # - Version 2 new: username:2:name:email:gpg:auto (should parse correctly)
+            # - Invalid version: username:99:... (should fail gracefully)
+            # - Corrupted profile line (should fail gracefully, not crash)
+            # - Empty profile file (should return 1)
+            # - Multiple profiles for same user (should use first)
             # Check if it's new format (5 fields) or old format (7+ fields)
             local field_count=$(echo "$profile_line" | tr ':' '\n' | wc -l)
             
@@ -875,6 +949,15 @@ display_simple_profile() {
 }
 
 # Helper function to extract and parse profile data
+# TEST: test_extract_profile_data()
+# - Empty username (should return 1)
+# - Non-existent user profile (should return 1, show error)
+# - Valid profile extraction (should return structured data)
+# - Current user detection (should set is_current correctly)
+# - Missing user ID (should handle gracefully)
+# - Profile parsing with various formats (via get_user_profile)
+# - Special characters in username (should handle safely)
+# - Very long usernames (should not break parsing)
 extract_profile_data() {
     local username="$1"
     local current_user="${2:-}"
@@ -1005,6 +1088,14 @@ display_rich_profile() {
 }
 
 # Helper function to resolve "current" username
+# TEST: test_resolve_current_username()
+# - gh command not found (should return 1, show error)
+# - gh not authenticated (should return 1, show error)  
+# - gh api fails (should return 1, show error)
+# - gh api returns empty (should return 1, show error)
+# - gh api returns valid username (should return 0, echo username)
+# - gh auth status passes but api fails (should return 1)
+# - Mock gh commands for isolated testing
 resolve_current_username() {
     if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
         local username=$(gh api user --jq '.login' 2>/dev/null || echo "")
@@ -1111,6 +1202,18 @@ run_manual_entry_workflow() {
 }
 
 # Helper function to update profile field
+# TEST: test_update_profile_field()
+# - Invalid field name (should return 1, show error)
+# - Empty value (should update to empty, return 0)
+# - Update by user number (should resolve and update)
+# - Update by username (should update directly)
+# - Update by "current" (should resolve current user and update)
+# - Non-existent user (should return 1, show error)
+# - User number out of range (should return 1)
+# - "current" when not authenticated (should return 1)
+# - Special characters in value (should handle safely)
+# - Very long value (should handle or limit appropriately)
+# - Profile write failure (should return 1, show error)
 update_profile_field() {
     local user_input="$1"
     local field="$2" 
@@ -1303,6 +1406,16 @@ apply_user_profile() {
 }
 
 # Helper function to apply git configuration with validation
+# TEST: test_apply_git_config()
+# - Invalid name/email (should return 1)
+# - Invalid scope parameter (should return 1)
+# - Not in git repo with local scope (should return 1)
+# - Git config set fails (mock git config to fail, should return 1)
+# - Git config verification fails (should return 1)
+# - Successful global config (should return 0, verify settings)
+# - Successful local config (should return 0, verify settings)
+# - Permission denied git config (should return 1)
+# - Git command not available (should return 1)
 apply_git_config() {
     local name="$1"
     local email="$2"
@@ -1527,6 +1640,15 @@ ghs() {
             ;;
             
         "profiles")
+            # TEST: test_ghs_profiles_command()
+            # - No profiles file (should show helpful message, return 0)
+            # - Empty profiles file (should show helpful message, return 0)
+            # - No --detailed flag (should call display_simple_profile)
+            # - --detailed flag (should call display_rich_profile)
+            # - Invalid flag (should default to simple, not crash)
+            # - Large number of profiles (should be performant)
+            # - Mixed profile formats (should handle gracefully via migration)
+            # - Current user highlighting (should work with/without auth)
             if [[ ! -f "$GH_USER_PROFILES" || ! -s "$GH_USER_PROFILES" ]]; then
                 echo "📋 No user profiles configured yet"
                 echo "   Profiles are created automatically when you add/switch users"
@@ -1583,6 +1705,14 @@ ghs() {
             ;;
             
         "update")
+            # TEST: test_ghs_update_command()
+            # - Missing arguments (should show usage, return 1)
+            # - Invalid field name (should return 1, show error)
+            # - Valid field update (should call update_profile_field)
+            # - Pattern consistency: same user references as switch/assign
+            # - Field validation: only allow name, email, gpg
+            # - Value with spaces (should handle quoted values)
+            # - Empty value (should allow clearing fields)
             local user_input="$2"
             local field="$3"
             local value="$4"
@@ -1626,6 +1756,17 @@ ghs() {
             ;;
             
         "add-user")
+            # TEST: test_ghs_add_user_command()
+            # - No username provided (should show usage, return 1)
+            # - Invalid username format (should return 1, show error)
+            # - "current" keyword with no auth (should return 1)
+            # - "current" keyword with auth (should detect and add user)
+            # - Existing user (should prompt for recreation)
+            # - New valid user (should add and create profile)
+            # - Auto-detection success (should use detected values)
+            # - Auto-detection failure (should fall back to manual)
+            # - Manual entry with invalid data (should return 1)
+            # - Manual entry with valid data (should create profile)
             local username="$2"
             if [[ -z "$username" ]]; then
                 echo "❌ Usage: ghs add-user <username>"
@@ -1660,6 +1801,15 @@ ghs() {
             ;;
             
         "switch")
+            # TEST: test_ghs_switch_command()
+            # - No user ID provided (should show usage, return 1)
+            # - Invalid user ID (should return 1)
+            # - Valid user ID (should switch GitHub auth and apply profile)
+            # - GitHub switch failure (should return 1, show error)
+            # - Profile application success (should show git config applied)
+            # - Profile application failure (should warn but continue)
+            # - Auto-profile creation when missing (should create and apply)
+            # - Integration test: full switch workflow
             local user_id="$2"
             if [[ -z "$user_id" ]]; then
                 echo "❌ Usage: ghs switch <user_number>"
@@ -1731,11 +1881,19 @@ ghs() {
                 fi
             fi
             
-            # Remove any existing entry for this project and add new one
-            touch "$GH_PROJECT_CONFIG"
-            grep -v "^$project=" "$GH_PROJECT_CONFIG" > "${GH_PROJECT_CONFIG}.tmp" 2>/dev/null || true
-            echo "$project=$username" >> "${GH_PROJECT_CONFIG}.tmp"
-            mv "${GH_PROJECT_CONFIG}.tmp" "$GH_PROJECT_CONFIG"
+                # Remove any existing entry for this project and add new one
+    # TEST: test_project_assignment_atomicity()
+    # - Concurrent project assignments (should not corrupt file)
+    # - Permission denied (should fail gracefully)
+    # - Disk full during write (should fail safely)  
+    # - Process killed during operation (should cleanup temp file)
+    # - Invalid project names (should validate/sanitize)
+    # - Very long project names (should handle or limit)
+    # - Special characters in project names (should escape properly)
+    touch "$GH_PROJECT_CONFIG"
+    grep -v "^$project=" "$GH_PROJECT_CONFIG" > "${GH_PROJECT_CONFIG}.tmp" 2>/dev/null || true
+    echo "$project=$username" >> "${GH_PROJECT_CONFIG}.tmp"
+    mv "${GH_PROJECT_CONFIG}.tmp" "$GH_PROJECT_CONFIG"
             
             echo "✅ Assigned $username as default account for $project"
             ;;
@@ -1909,6 +2067,15 @@ ghs() {
             
         *)
             # Default action: show smart dashboard
+            # TEST: test_ghs_default_dashboard()
+            # - First time setup flow (no users file)
+            # - Normal dashboard display (with users)
+            # - gh not authenticated (should show onboarding)
+            # - gh command not found (should show installation help)
+            # - Current user not in list (should show add-user suggestion)
+            # - Git config mismatch (should show warning)
+            # - Project assignment workflows (should show relevant actions)
+            # - Performance with many users/projects (should be fast)
             # 
             # LIBRARY TRANSFORMATION NOTES:
             # This entire dashboard would become: gh_switcher_show_dashboard()
