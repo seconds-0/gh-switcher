@@ -227,7 +227,7 @@ ghs profiles               # Shows profile information
 
 **Implementation:**
 ```bash
-set_profile_field() {
+update_profile_field() {
     local user_input="$1"
     local field="$2" 
     local value="$3"
@@ -466,8 +466,8 @@ fi
 - [ ] Replace `display_rich_profile()` calls with simple version
 - [ ] Add `--detailed` flag for rich display
 - [ ] Remove interactive editor while loop (~80 lines)
-- [ ] Create `set_profile_field()` function
-- [ ] Update `ghs set` command with number/username/current patterns
+- [ ] Create `update_profile_field()` function
+- [ ] Update `ghs update` command with number/username/current patterns
 - [ ] Simplify health check output and language
 - [ ] Remove medical metaphors from all functions
 - [ ] Test UX improvements
@@ -483,7 +483,7 @@ fi
 - [ ] Reduce emoji usage from 17 to 5 types
 - [ ] Replace all medical metaphors with neutral language
 - [ ] Simplify technical jargon in user-facing messages
-- [ ] Update help text to include `ghs set` command and patterns
+- [ ] Update help text to include `ghs update` command and patterns
 - [ ] Test final polish
 
 ### Verification Steps
@@ -500,8 +500,8 @@ fi
 - **Code reduction**: 500+ lines removed (23% reduction)
 - **Function size**: No function >40 lines (vs current 103-line max)
 - **Emoji reduction**: 17 → 5 types (70% reduction)
-- **Command simplification**: 1-step field setting vs multi-step interactive editor
-- **Pattern consistency**: `ghs set` aligns with existing numbered user system
+- **Command simplification**: 1-step field updates vs multi-step interactive editor
+- **Pattern consistency**: `ghs update` aligns with existing numbered user system
 
 ### Qualitative Improvements  
 - **Simpler UX**: Less cognitive load, faster workflows
@@ -511,9 +511,9 @@ fi
 
 ### User Experience
 - **Faster daily workflows**: `ghs profiles` shows essential info quickly
-- **Scriptable field setting**: `ghs set user field value` works in scripts
-- **Convenient patterns**: `ghs set current name "John"` for logged-in user
-- **Consistent numbering**: `ghs set 1 email "john@email.com"` aligns with existing commands
+- **Scriptable field updates**: `ghs update user field value` works in scripts
+- **Convenient patterns**: `ghs update current name "John"` for logged-in user
+- **Consistent numbering**: `ghs update 1 email "john@email.com"` aligns with existing commands
 - **Optional complexity**: `--detailed` flag for power users
 - **Cleaner output**: Less noise, more signal
 
@@ -545,7 +545,7 @@ Not Started
 
 **User Input Required:**
 - Default simple vs detailed profile display preference
-- Field names for `ghs set` command (name, email, gpg)
+- Field names for `ghs update` command (name, email, gpg)
 - Migration timeline for existing users
 
 ## Questions/Uncertainties
@@ -611,14 +611,14 @@ ghs set current gpg "ABC123"    # Convenient for daily use
 
 ```bash
 # Quick setup for current user:
-ghs set current name "Jane Developer"
-ghs set current email "jane@company.com"
-ghs set current gpg "ABC123DEF456"
+ghs update current name "Jane Developer"
+ghs update current email "jane@company.com"
+ghs update current gpg "ABC123DEF456"
 
 # Manage multiple profiles by number:
-ghs set 1 email "personal@gmail.com"   # Personal
-ghs set 2 email "work@company.com"     # Work  
-ghs set 3 email "client@startup.com"   # Client
+ghs update 1 email "personal@gmail.com"   # Personal
+ghs update 2 email "work@company.com"     # Work  
+ghs update 3 email "client@startup.com"   # Client
 
 # Switch and verify:
 ghs switch 2
