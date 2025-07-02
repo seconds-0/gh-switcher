@@ -406,6 +406,7 @@ validate_ssh_key() {
     if ! grep -q "BEGIN.*PRIVATE KEY" "$ssh_key_path" 2>/dev/null; then
         echo "⚠️  SSH key file doesn't appear to be a private key"
         echo "   Make sure you're using the private key (not .pub file)"
+        return 1
     fi
     
     return 0
@@ -567,8 +568,8 @@ validate_profile_input() {
 # Helper function to encode profile data safely
 encode_profile_value() {
     local value="$1"
-    # Use base64 encoding to handle any special characters
-    echo "$value" | base64 | tr -d '\n'
+    # Use printf to avoid trailing newlines, base64 with -w0 to avoid line wrapping
+    printf '%s' "$value" | base64 -w0 2>/dev/null || printf '%s' "$value" | base64 | tr -d '\n'
 }
 
 # Helper function to decode profile data safely
@@ -642,11 +643,23 @@ write_profile_entry() {
     
     # Add new profile (format: username:version:base64(name):base64(email):base64(ssh_key))
     # Version 2 includes SSH key support
+    local profile_line
     if [[ -n "$encoded_ssh_key" ]]; then
-        echo "$username:2:$encoded_name:$encoded_email:$encoded_ssh_key" >> "${GH_USER_PROFILES}.tmp"
+        profile_line="$username:2:$encoded_name:$encoded_email:$encoded_ssh_key"
     else
-        echo "$username:2:$encoded_name:$encoded_email:" >> "${GH_USER_PROFILES}.tmp"
+        profile_line="$username:2:$encoded_name:$encoded_email:"
     fi
+    
+    # Validate profile line format before writing (prevent corruption)
+    local field_count=$(echo "$profile_line" | tr ':' '\n' | wc -l)
+    if [[ "$field_count" -ne 5 ]]; then
+        echo "❌ Internal error: malformed profile line (expected 5 fields, got $field_count)"
+        echo "   Profile line: $profile_line"
+        rm -f "${GH_USER_PROFILES}.tmp" 2>/dev/null
+        return 1
+    fi
+    
+    echo "$profile_line" >> "${GH_USER_PROFILES}.tmp"
     
     # Atomic move
     if mv "${GH_USER_PROFILES}.tmp" "$GH_USER_PROFILES" 2>/dev/null; then
@@ -739,7 +752,8 @@ create_user_profile() {
                 echo "   You can add the SSH key to GitHub later: https://github.com/settings/keys"
             fi
         else
-            return 1  # SSH validation failed
+            echo "⚠️  SSH key validation failed, continuing without SSH key"
+            ssh_key_path=""  # Clear the SSH key path so profile is created without it
         fi
     fi
     
@@ -763,8 +777,8 @@ migrate_old_profile_format() {
         return 0
     fi
     
-    # Check if file contains old format (has = instead of :)
-    if grep -q "=" "$GH_USER_PROFILES" 2>/dev/null; then
+    # Check if file contains old format (lines starting with username=)
+    if grep -q "^[^:]*=" "$GH_USER_PROFILES" 2>/dev/null; then
         echo "🔄 Migrating profiles to new format..."
         local backup_file="${GH_USER_PROFILES}.backup.$(date +%s)"
         
@@ -1090,10 +1104,13 @@ remove_user() {
     local username=""
     local user_id=""
     if [[ "$input" =~ ^[0-9]+$ ]]; then
-        username=$(get_user_by_id "$input")
-        if [[ $? -ne 0 ]]; then
+        # Don't capture output if get_user_by_id fails - let the error show
+        if ! get_user_by_id "$input" >/dev/null 2>&1; then
+            # Show the error message by calling again without output capture
+            get_user_by_id "$input"
             return 1
         fi
+        username=$(get_user_by_id "$input")
         user_id="$input"
         echo "💡 Removing user #$user_id: $username"
     else

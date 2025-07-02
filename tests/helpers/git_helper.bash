@@ -131,10 +131,19 @@ assert_git_global_config() {
     local actual_value
     
     actual_value=$(git config --global --get "$config_key" 2>/dev/null || echo "")
-    [[ "$actual_value" == "$expected_value" ]] || {
-        echo "Expected global git config '$config_key' to be '$expected_value', got '$actual_value'"
-        return 1
-    }
+    
+    # Support pattern matching if expected_value contains wildcards
+    if [[ "$expected_value" == *"*"* ]]; then
+        [[ "$actual_value" == $expected_value ]] || {
+            echo "Expected global git config '$config_key' to be '$expected_value', got '$actual_value'"
+            return 1
+        }
+    else
+        [[ "$actual_value" == "$expected_value" ]] || {
+            echo "Expected global git config '$config_key' to be '$expected_value', got '$actual_value'"
+            return 1
+        }
+    fi
 }
 
 # Assert that SSH command is configured in git

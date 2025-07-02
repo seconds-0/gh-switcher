@@ -198,12 +198,15 @@ teardown() {
     local nonexistent_key="$TEST_HOME/nonexistent_key"
     create_user_profile "testuser" "Test User" "test@example.com" "false" "$nonexistent_key" >/dev/null 2>&1
     
+    # Verify that profile was created without SSH key (it was cleared due to validation failure)
+    assert_profile_has_no_ssh_key "testuser"
+    
     # When
     run apply_user_profile "testuser" "local"
     
     # Then
-    assert_success  # Should continue despite SSH failure
-    assert_output_contains "SSH key validation failed"
+    assert_success  # Should work fine with HTTPS profile
+    assert_output_contains "Updated local git config"
     assert_git_local_config "user.name" "Test User"
     assert_git_local_config "user.email" "test@example.com"
 }
