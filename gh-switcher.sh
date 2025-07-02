@@ -487,22 +487,28 @@ write_profile_entry() {
         return 1
     fi
     
-    # Remove existing profile for this user
+    # Atomic update with proper temp file handling
+    local temp_file="${GH_USER_PROFILES}.tmp.$$"
+    
+    # Set up cleanup trap for temp file
+    trap 'rm -f "$temp_file"' EXIT
+    
+    # Remove existing profile for this user and add new profile
     if [[ -f "$GH_USER_PROFILES" ]]; then
-        grep -v "^$username:" "$GH_USER_PROFILES" > "${GH_USER_PROFILES}.tmp" 2>/dev/null || true
+        grep -v "^$username:" "$GH_USER_PROFILES" > "$temp_file" 2>/dev/null || true
     else
-        touch "${GH_USER_PROFILES}.tmp"
+        > "$temp_file"
     fi
     
     # Add new profile (format: username:2:base64(name):base64(email):base64(gpg_key):auto_sign)
-    echo "$username:2:$encoded_name:$encoded_email:$encoded_gpg_key:$auto_sign" >> "${GH_USER_PROFILES}.tmp"
+    echo "$username:2:$encoded_name:$encoded_email:$encoded_gpg_key:$auto_sign" >> "$temp_file"
     
-    # Atomic move
-    if mv "${GH_USER_PROFILES}.tmp" "$GH_USER_PROFILES" 2>/dev/null; then
+    # Atomic move (same filesystem required)
+    if mv "$temp_file" "$GH_USER_PROFILES" 2>/dev/null; then
+        trap - EXIT  # Clear trap on success
         return 0
     else
         echo "❌ Failed to update profile file"
-        rm -f "${GH_USER_PROFILES}.tmp" 2>/dev/null
         return 1
     fi
 }
@@ -673,6 +679,9 @@ get_user_profile() {
         local version=$(echo "$profile_line" | cut -d':' -f2)
         
         if [[ "$version" == "2" ]]; then
+            # TODO: Plan migration timeline for legacy format support
+            # Current backward compatibility logic supports 4 different profile formats
+            # Consider deprecation schedule: 6 months notice, then drop legacy support
             # Check if it's new format (5 fields) or old format (7+ fields)
             local field_count=$(echo "$profile_line" | tr ':' '\n' | wc -l)
             
@@ -760,6 +769,8 @@ get_user_profile() {
 }
 
 # Helper function to validate profile completeness (simplified)
+# TODO: Standardize error handling strategy across all functions
+# Currently uses mix of echo statements and return codes - consider structured error format
 validate_profile_completeness() {
     local username="$1"
     local profile=$(get_user_profile "$username")
@@ -1010,7 +1021,7 @@ resolve_current_username() {
 }
 
 # Helper function to check if user exists and handle duplication
-handle_user_existence() {
+check_user_existence() {
     local username="$1"
     
     if [[ -f "$GH_USERS_CONFIG" ]] && grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
@@ -1028,8 +1039,8 @@ handle_user_existence() {
     fi
 }
 
-# Helper function to handle auto-detection workflow
-handle_autodetection_workflow() {
+# Helper function to run auto-detection workflow
+run_autodetection_workflow() {
     local username="$1"
     
     echo "🔍 Detecting current git configuration..."
@@ -1065,15 +1076,15 @@ handle_autodetection_workflow() {
             echo "💡 Profile created! Use 'ghs update $username <field> \"<value>\"' to modify fields"
             ;;
         *)
-            handle_manual_entry_workflow "$username"
+            run_manual_entry_workflow "$username"
             ;;
     esac
     
     return 0
 }
 
-# Helper function to handle manual entry workflow
-handle_manual_entry_workflow() {
+# Helper function to run manual entry workflow
+run_manual_entry_workflow() {
     local username="$1"
     
     echo "📝 Manual profile creation:"
@@ -1138,6 +1149,8 @@ update_profile_field() {
     fi
     
     # Extract current values
+    # TODO: Consider centralizing profile parsing to reduce data structure coupling
+    # Current string parsing is embedded throughout codebase - works well but tightly coupled
     local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
     local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
     local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
@@ -1630,14 +1643,14 @@ ghs() {
             fi
             
             # Check if user already exists and handle
-            if ! handle_user_existence "$username"; then
+            if ! check_user_existence "$username"; then
                 return 0
             fi
             
             # Try auto-detection workflow, fallback to manual if needed
-            if ! handle_autodetection_workflow "$username"; then
+            if ! run_autodetection_workflow "$username"; then
                 echo "⚠️  Could not detect git configuration"
-                if ! handle_manual_entry_workflow "$username"; then
+                if ! run_manual_entry_workflow "$username"; then
                     return 1
                 fi
             fi
