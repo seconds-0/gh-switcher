@@ -190,26 +190,39 @@ ghs profiles --detailed # Current rich display (for debugging)
 
 **New simple commands using established patterns:**
 ```bash
-ghs set 1 name "John Smith"           # Set by user number (existing pattern)
-ghs set john-user email "john@email.com" # Set by username (existing pattern)  
-ghs set current name "John Smith"     # Set current user (new convenience)
-ghs set 2 gpg "ABC123DEF456"         # Set GPG key
-ghs set current gpg ""               # Clear GPG key for current user
+ghs update 1 name "John Smith"           # Update by user number (existing pattern)
+ghs update john-user email "john@email.com" # Update by username (existing pattern)  
+ghs update current name "John Smith"     # Update current user (new convenience)
+ghs update 2 gpg "ABC123DEF456"         # Update GPG key
+ghs update current gpg ""               # Clear GPG key for current user
 ```
 
 **Pattern consistency with existing commands:**
 ```bash
 # Existing numbered user pattern:
-ghs switch 1        → ghs set 1 name "John"
-ghs assign 2        → ghs set 2 email "john@email.com"  
-ghs validate 1      → ghs set 1 gpg "ABC123"
+ghs switch 1        → ghs update 1 name "John"
+ghs assign 2        → ghs update 2 email "john@email.com"  
+ghs validate 1      → ghs update 1 gpg "ABC123"
 
 # Existing username pattern:
-ghs switch john     → ghs set john name "John"
-ghs validate john   → ghs set john email "john@email.com"
+ghs switch john     → ghs update john name "John"
+ghs validate john   → ghs update john email "john@email.com"
 
 # New convenience pattern:
-ghs add-user current → ghs set current name "John"
+ghs add-user current → ghs update current name "John"
+```
+
+**Clear domain separation:**
+```bash
+# Project operations (user ↔ project relationships):
+ghs assign 2        # Assigns user #2 to current project
+ghs switch 1        # Switches to user #1
+ghs list           # Lists project assignments
+
+# Profile operations (user field modifications):  
+ghs update 2 name "John"    # Updates user #2's name field
+ghs update 1 email "X"      # Updates user #1's email field
+ghs profiles               # Shows profile information
 ```
 
 **Implementation:**
