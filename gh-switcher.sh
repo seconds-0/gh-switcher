@@ -196,12 +196,12 @@ list_users() {
             if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
                 local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
                 if [[ "$username" == "$current_user" ]]; then
-                    echo "  🟢 $i. $username (current)"
+                    echo "  ✅ $i. $username (current)"
                 else
-                    echo "  ⚪ $i. $username"
+                    echo "     $i. $username"
                 fi
             else
-                echo "  ⚪ $i. $username"
+                echo "     $i. $username"
             fi
             ((i++))
         fi
@@ -294,65 +294,65 @@ detect_git_config() {
     return 0
 }
 
-# Helper function to detect GPG signing key
-detect_gpg_key() {
+# Helper function to detect git configuration (consolidated)
+detect_git_config_extended() {
     local scope="${1:-auto}"  # 'local', 'global', or 'auto'
     
     if ! check_git_availability; then
         return 1
     fi
     
-    local gpg_key=""
+    local git_flags=""
     
     if [[ "$scope" == "global" ]]; then
-        gpg_key=$(git config --global --get user.signingkey 2>/dev/null || echo "")
+        git_flags="--global"
     elif [[ "$scope" == "local" ]]; then
-        gpg_key=$(git config --local --get user.signingkey 2>/dev/null || echo "")
-    else
-        # Auto mode: check local first, then global
-        gpg_key=$(git config --get user.signingkey 2>/dev/null || echo "")
-        
-        # If nothing found and we were looking for local, try global as fallback
-        if [[ -z "$gpg_key" && "$scope" == "local" ]]; then
-            gpg_key=$(git config --global --get user.signingkey 2>/dev/null || echo "")
-        fi
+        git_flags="--local"
+    # else auto mode - no flags, git uses its own precedence
     fi
     
-    echo "$gpg_key"
+    # Get all relevant config in one go
+    local name=$(git config $git_flags --get user.name 2>/dev/null || echo "")
+    local email=$(git config $git_flags --get user.email 2>/dev/null || echo "")
+    local gpg_key=$(git config $git_flags --get user.signingkey 2>/dev/null || echo "")
+    local auto_sign=$(git config $git_flags --get commit.gpgsign 2>/dev/null || echo "")
+    
+    # Convert auto_sign to boolean
+    if [[ "$auto_sign" == "true" ]]; then
+        auto_sign="true"
+    else
+        auto_sign="false"
+    fi
+    
+    # Output structured data
+    echo "name:$name"
+    echo "email:$email"
+    echo "gpg_key:$gpg_key"
+    echo "auto_sign:$auto_sign"
+    
     return 0
 }
 
-# Helper function to detect auto-sign preference
+# Helper function to detect GPG signing key (backward compatibility wrapper)
+detect_gpg_key() {
+    local scope="${1:-auto}"
+    local config=$(detect_git_config_extended "$scope")
+    if [[ $? -eq 0 ]]; then
+        echo "$config" | grep "^gpg_key:" | cut -d':' -f2-
+        return 0
+    fi
+    return 1
+}
+
+# Helper function to detect auto-sign preference (backward compatibility wrapper)
 detect_auto_sign() {
-    local scope="${1:-auto}"  # 'local', 'global', or 'auto'
-    
-    if ! check_git_availability; then
-        return 1
+    local scope="${1:-auto}"
+    local config=$(detect_git_config_extended "$scope")
+    if [[ $? -eq 0 ]]; then
+        echo "$config" | grep "^auto_sign:" | cut -d':' -f2-
+        return 0
     fi
-    
-    local auto_sign=""
-    
-    if [[ "$scope" == "global" ]]; then
-        auto_sign=$(git config --global --get commit.gpgsign 2>/dev/null || echo "")
-    elif [[ "$scope" == "local" ]]; then
-        auto_sign=$(git config --local --get commit.gpgsign 2>/dev/null || echo "")
-    else
-        # Auto mode: check local first, then global
-        auto_sign=$(git config --get commit.gpgsign 2>/dev/null || echo "")
-        
-        # If nothing found and we were looking for local, try global as fallback
-        if [[ -z "$auto_sign" && "$scope" == "local" ]]; then
-            auto_sign=$(git config --global --get commit.gpgsign 2>/dev/null || echo "")
-        fi
-    fi
-    
-    # Convert to boolean
-    if [[ "$auto_sign" == "true" ]]; then
-        echo "true"
-    else
-        echo "false"
-    fi
-    return 0
+    return 1
 }
 
 
@@ -579,7 +579,7 @@ create_user_profile() {
     if write_profile_entry "$username" "$name" "$email" "$gpg_key" "$auto_sign"; then
         echo "✅ Created profile for $username: $name <$email>"
         if [[ -n "$gpg_key" ]]; then
-            echo "   🔑 GPG key: $gpg_key (auto-sign: $auto_sign)"
+            echo "   � GPG key: $gpg_key (auto-sign: $auto_sign)"
         fi
         return 0
     else
@@ -863,14 +863,14 @@ display_simple_profile() {
     fi
 }
 
-# Helper function to display rich profile information
-display_rich_profile() {
+# Helper function to extract and parse profile data
+extract_profile_data() {
     local username="$1"
-    local current_user="${2:-}"  # Optional: current GitHub user for highlighting
-    local profile=$(get_user_profile "$username")
+    local current_user="${2:-}"
     
+    local profile=$(get_user_profile "$username")
     if [[ $? -ne 0 ]]; then
-        echo "❌ No profile found for $username"
+        echo "error:No profile found for $username"
         return 1
     fi
     
@@ -887,9 +887,25 @@ display_rich_profile() {
     
     # Check if current user
     local is_current=""
-    if [[ "$username" == "$current_user" ]]; then
-        is_current=" (current)"
-    fi
+    [[ "$username" == "$current_user" ]] && is_current="true"
+    
+    # Output structured data
+    echo "username:$username"
+    echo "name:$name"
+    echo "email:$email"
+    echo "gpg_key:$gpg_key"
+    echo "auto_sign:$auto_sign"
+    echo "user_id:$user_id"
+    echo "is_current:$is_current"
+}
+
+# Helper function to format profile header with status
+format_profile_header() {
+    local data="$1"
+    
+    local username=$(echo "$data" | grep "^username:" | cut -d':' -f2-)
+    local user_id=$(echo "$data" | grep "^user_id:" | cut -d':' -f2-)
+    local is_current=$(echo "$data" | grep "^is_current:" | cut -d':' -f2-)
     
     # Check profile completeness
     local completeness_icon="✅"
@@ -900,14 +916,27 @@ display_rich_profile() {
         completeness_note=" [⚠️ Incomplete]"
     fi
     
+    # Current user indicator
+    local current_indicator=""
+    [[ "$is_current" == "true" ]] && current_indicator=" (current)"
+    
     # Display header
     if [[ -n "$user_id" ]]; then
-        echo "$completeness_icon $user_id. $username$completeness_note$is_current"
+        echo "$completeness_icon $user_id. $username$completeness_note$current_indicator"
     else
-        echo "$completeness_icon $username$completeness_note$is_current"
+        echo "$completeness_icon $username$completeness_note$current_indicator"
     fi
+}
+
+# Helper function to format profile details
+format_profile_details() {
+    local data="$1"
     
-    # Display details with indentation
+    local name=$(echo "$data" | grep "^name:" | cut -d':' -f2-)
+    local email=$(echo "$data" | grep "^email:" | cut -d':' -f2-)
+    local gpg_key=$(echo "$data" | grep "^gpg_key:" | cut -d':' -f2-)
+    local auto_sign=$(echo "$data" | grep "^auto_sign:" | cut -d':' -f2-)
+    
     echo "     Name: $name"
     echo "     Email: $email"
     
@@ -922,8 +951,12 @@ display_rich_profile() {
     else
         echo "     GPG: Not configured"
     fi
+}
+
+# Helper function to format authentication status
+format_auth_status() {
+    local username="$1"
     
-    # GitHub auth status
     if command -v gh >/dev/null 2>&1; then
         if gh auth status --hostname github.com >/dev/null 2>&1; then
             local authenticated_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
@@ -938,6 +971,24 @@ display_rich_profile() {
     else
         echo "     Auth: ❌ GitHub CLI not available"
     fi
+}
+
+# Helper function to display rich profile information (orchestrator)
+display_rich_profile() {
+    local username="$1"
+    local current_user="${2:-}"
+    
+    # Extract profile data
+    local profile_data=$(extract_profile_data "$username" "$current_user")
+    if echo "$profile_data" | grep -q "^error:"; then
+        echo "❌ $(echo "$profile_data" | grep "^error:" | cut -d':' -f2-)"
+        return 1
+    fi
+    
+    # Format and display components
+    format_profile_header "$profile_data"
+    format_profile_details "$profile_data"
+    format_auth_status "$username"
     
     return 0
 }
@@ -1208,7 +1259,7 @@ apply_user_profile() {
         
         # Set GPG signing key
         if git config $git_flags user.signingkey "$gpg_key" 2>/dev/null; then
-            echo "🔑 Applied GPG key: $gpg_key"
+            echo "✅ Applied GPG key: $gpg_key"
             
             # Set auto-sign preference
             if [[ "$auto_sign" == "true" ]]; then
@@ -1616,7 +1667,7 @@ ghs() {
                         if apply_user_profile "$username" "local"; then
                             local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
                             local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
-                            echo "🔧 Applied git config: $name <$email>"
+                            echo "✅ Applied git config: $name <$email>"
                         else
                             echo "⚠️  Could not apply git config profile (continuing with GitHub switch)"
                         fi
@@ -1626,7 +1677,7 @@ ghs() {
                         if create_user_profile "$username" "" "" "true"; then
                             # Now apply the newly created profile
                             if apply_user_profile "$username" "local"; then
-                                echo "🔧 Applied newly created git config profile"
+                                echo "✅ Applied newly created git config profile"
                             else
                                 echo "⚠️  Created profile but could not apply git config"
                             fi
@@ -1693,9 +1744,9 @@ ghs() {
                         fi
                         
                         if [[ "$proj" == "$project" ]]; then
-                            echo "  🟢 $proj → $user_display (current project)"
+                            echo "  ✅ $proj → $user_display (current project)"
                         else
-                            echo "  ⚪ $proj → $user_display"
+                            echo "     $proj → $user_display"
                         fi
                     fi
                 done < "$GH_PROJECT_CONFIG"
@@ -1717,9 +1768,9 @@ ghs() {
                 fi
                 
                 if [[ -n "$current_user_id" ]]; then
-                    echo "🔑 Current GitHub user: $current_user (#$current_user_id)"
+                    echo "� Current GitHub user: $current_user (#$current_user_id)"
                 else
-                    echo "🔑 Current GitHub user: $current_user"
+                    echo "� Current GitHub user: $current_user"
                 fi
                 
                 local project_user=""
@@ -1896,7 +1947,7 @@ ghs() {
                 fi
                 
                 if [[ "$user_in_list" == true ]]; then
-                    echo "🔑 Current user: $current_user (#$current_user_id)"
+                    echo "� Current user: $current_user (#$current_user_id)"
                     
                     # Show git config status
                     local profile=$(get_user_profile "$current_user")
@@ -1911,21 +1962,21 @@ ghs() {
                             
                             if [[ -n "$current_git_name" && -n "$current_git_email" ]]; then
                                 if [[ "$current_git_name" == "$profile_name" && "$current_git_email" == "$profile_email" ]]; then
-                                    echo "🔧 Git config: ✅ matches profile"
+                                    echo "✅ Git config matches profile"
                                 else
-                                    echo "🔧 Git config: ⚠️  mismatch ($current_git_name <$current_git_email>)"
+                                    echo "⚠️ Git config mismatch ($current_git_name <$current_git_email>)"
                                 fi
                             else
-                                echo "🔧 Git config: ❌ not configured"
+                                echo "❌ Git config not configured"
                             fi
                         else
-                            echo "🔧 Git config: ❌ git not available"
+                            echo "❌ Git not available"
                         fi
                     else
-                        echo "🔧 Git config: ❓ no profile"
+                        echo "� No profile configured"
                     fi
                 else
-                    echo "🔑 Current user: $current_user"
+                    echo "� Current user: $current_user"
                     # Show onboarding prompt if user is not in list
                     if [[ "$current_user" != "unknown" && "$current_user" != "" ]]; then
                         echo ""
@@ -1974,13 +2025,13 @@ ghs() {
                     if [[ -n "$username" ]]; then
                         if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
                             local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
-                            if [[ "$username" == "$current_user" ]]; then
-                                echo "  🟢 $i. $username (current)"
-                            else
-                                echo "  ⚪ $i. $username"
-                            fi
+                                                    if [[ "$username" == "$current_user" ]]; then
+                            echo "  ✅ $i. $username (current)"
                         else
-                            echo "  ⚪ $i. $username"
+                            echo "     $i. $username"
+                        fi
+                    else
+                        echo "     $i. $username"
                         fi
                         ((i++))
                     fi
