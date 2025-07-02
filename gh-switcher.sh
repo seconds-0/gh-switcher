@@ -355,29 +355,7 @@ detect_auto_sign() {
     return 0
 }
 
-# Helper function to detect SSH key for user
-detect_ssh_key() {
-    local username="$1"
-    
-    # Common SSH key paths
-    local ssh_keys=(
-        "$HOME/.ssh/id_rsa"
-        "$HOME/.ssh/id_ed25519"
-        "$HOME/.ssh/id_ecdsa"
-        "$HOME/.ssh/id_rsa_$username"
-        "$HOME/.ssh/id_ed25519_$username"
-    )
-    
-    # Return first existing key
-    for key in "${ssh_keys[@]}"; do
-        if [[ -f "$key" ]]; then
-            echo "$key"
-            return 0
-        fi
-    done
-    
-    return 1
-}
+
 
 # Helper function to validate GPG key
 validate_gpg_key() {
@@ -406,7 +384,6 @@ validate_profile_input() {
     local name="$2" 
     local email="$3"
     local gpg_key="$4"
-    local ssh_key="$5"
     
     # Username validation
     if [[ -z "$username" ]]; then
@@ -454,18 +431,6 @@ validate_profile_input() {
         fi
     fi
     
-    # SSH key validation (optional)
-    if [[ -n "$ssh_key" ]]; then
-        if [[ ${#ssh_key} -gt 255 ]]; then
-            echo "❌ SSH key path too long (max 255 characters)"
-            return 1
-        fi
-        # Check if path exists (if specified)
-        if [[ "$ssh_key" != "" && ! -f "$ssh_key" ]]; then
-            echo "⚠️  SSH key file does not exist: $ssh_key"
-        fi
-    fi
-    
     return 0
 }
 
@@ -488,17 +453,10 @@ write_profile_entry() {
     local name="$2"
     local email="$3"
     local gpg_key="${4:-}"
-    local ssh_key="${5:-}"
-    local auto_sign="${6:-false}"
-    local last_used="${7:-}"
-    
-    # Set defaults
-    if [[ -z "$last_used" ]]; then
-        last_used=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
-    fi
+    local auto_sign="${5:-false}"
     
     # Validate inputs
-    if ! validate_profile_input "$username" "$name" "$email" "$gpg_key" "$ssh_key"; then
+    if ! validate_profile_input "$username" "$name" "$email" "$gpg_key"; then
         return 1
     fi
     
@@ -506,7 +464,6 @@ write_profile_entry() {
     local encoded_name=$(encode_profile_value "$name")
     local encoded_email=$(encode_profile_value "$email")
     local encoded_gpg_key=$(encode_profile_value "$gpg_key")
-    local encoded_ssh_key=$(encode_profile_value "$ssh_key")
     
     if [[ -z "$encoded_name" || -z "$encoded_email" ]]; then
         echo "❌ Failed to encode profile data"
@@ -537,8 +494,8 @@ write_profile_entry() {
         touch "${GH_USER_PROFILES}.tmp"
     fi
     
-    # Add new profile (format: username:2:base64(name):base64(email):base64(gpg_key):base64(ssh_key):auto_sign:last_used)
-    echo "$username:2:$encoded_name:$encoded_email:$encoded_gpg_key:$encoded_ssh_key:$auto_sign:$last_used" >> "${GH_USER_PROFILES}.tmp"
+    # Add new profile (format: username:2:base64(name):base64(email):base64(gpg_key):auto_sign)
+    echo "$username:2:$encoded_name:$encoded_email:$encoded_gpg_key:$auto_sign" >> "${GH_USER_PROFILES}.tmp"
     
     # Atomic move
     if mv "${GH_USER_PROFILES}.tmp" "$GH_USER_PROFILES" 2>/dev/null; then
@@ -557,8 +514,7 @@ create_user_profile() {
     local email="$3"
     local auto_capture="${4:-false}"  # Whether to auto-capture from current git config
     local gpg_key="${5:-}"
-    local ssh_key="${6:-}"
-    local auto_sign="${7:-}"
+    local auto_sign="${6:-}"
     
     if [[ -z "$username" ]]; then
         echo "❌ Username required for profile creation"
@@ -606,11 +562,6 @@ create_user_profile() {
         if [[ -z "$auto_sign" ]]; then
             auto_sign=$(detect_auto_sign "auto")
         fi
-        
-        # Auto-detect SSH key if not provided
-        if [[ -z "$ssh_key" ]]; then
-            ssh_key=$(detect_ssh_key "$username")
-        fi
     fi
     
     # Use defaults if still empty
@@ -625,13 +576,10 @@ create_user_profile() {
     fi
     
     # Write the profile
-    if write_profile_entry "$username" "$name" "$email" "$gpg_key" "$ssh_key" "$auto_sign"; then
+    if write_profile_entry "$username" "$name" "$email" "$gpg_key" "$auto_sign"; then
         echo "✅ Created profile for $username: $name <$email>"
         if [[ -n "$gpg_key" ]]; then
             echo "   🔑 GPG key: $gpg_key (auto-sign: $auto_sign)"
-        fi
-        if [[ -n "$ssh_key" ]]; then
-            echo "   🔐 SSH key: $ssh_key"
         fi
         return 0
     else
@@ -725,29 +673,50 @@ get_user_profile() {
         local version=$(echo "$profile_line" | cut -d':' -f2)
         
         if [[ "$version" == "2" ]]; then
-            # Version 2 format: username:2:base64(name):base64(email):base64(gpg_key):base64(ssh_key):auto_sign:last_used
-            local encoded_name=$(echo "$profile_line" | cut -d':' -f3)
-            local encoded_email=$(echo "$profile_line" | cut -d':' -f4)
-            local encoded_gpg_key=$(echo "$profile_line" | cut -d':' -f5)
-            local encoded_ssh_key=$(echo "$profile_line" | cut -d':' -f6)
-            local auto_sign=$(echo "$profile_line" | cut -d':' -f7)
-            local last_used=$(echo "$profile_line" | cut -d':' -f8)
+            # Check if it's new format (5 fields) or old format (7+ fields)
+            local field_count=$(echo "$profile_line" | tr ':' '\n' | wc -l)
             
-            if [[ -n "$encoded_name" && -n "$encoded_email" ]]; then
-                local name=$(decode_profile_value "$encoded_name")
-                local email=$(decode_profile_value "$encoded_email")
-                local gpg_key=$(decode_profile_value "$encoded_gpg_key")
-                local ssh_key=$(decode_profile_value "$encoded_ssh_key")
+            if [[ $field_count -eq 6 ]]; then
+                # New version 2 format: username:2:base64(name):base64(email):base64(gpg_key):auto_sign
+                local encoded_name=$(echo "$profile_line" | cut -d':' -f3)
+                local encoded_email=$(echo "$profile_line" | cut -d':' -f4)
+                local encoded_gpg_key=$(echo "$profile_line" | cut -d':' -f5)
+                local auto_sign=$(echo "$profile_line" | cut -d':' -f6)
                 
-                if [[ -n "$name" && -n "$email" ]]; then
-                    echo "name:$name"
-                    echo "email:$email"
-                    echo "gpg_key:$gpg_key"
-                    echo "ssh_key:$ssh_key"
-                    echo "auto_sign:$auto_sign"
-                    echo "last_used:$last_used"
-                    echo "version:2"
-                    return 0
+                if [[ -n "$encoded_name" && -n "$encoded_email" ]]; then
+                    local name=$(decode_profile_value "$encoded_name")
+                    local email=$(decode_profile_value "$encoded_email")
+                    local gpg_key=$(decode_profile_value "$encoded_gpg_key")
+                    
+                    if [[ -n "$name" && -n "$email" ]]; then
+                        echo "name:$name"
+                        echo "email:$email"
+                        echo "gpg_key:$gpg_key"
+                        echo "auto_sign:$auto_sign"
+                        echo "version:2"
+                        return 0
+                    fi
+                fi
+            else
+                # Old version 2 format: username:2:base64(name):base64(email):base64(gpg_key):base64(ssh_key):auto_sign:last_used
+                local encoded_name=$(echo "$profile_line" | cut -d':' -f3)
+                local encoded_email=$(echo "$profile_line" | cut -d':' -f4)
+                local encoded_gpg_key=$(echo "$profile_line" | cut -d':' -f5)
+                local auto_sign=$(echo "$profile_line" | cut -d':' -f7)
+                
+                if [[ -n "$encoded_name" && -n "$encoded_email" ]]; then
+                    local name=$(decode_profile_value "$encoded_name")
+                    local email=$(decode_profile_value "$encoded_email")
+                    local gpg_key=$(decode_profile_value "$encoded_gpg_key")
+                    
+                    if [[ -n "$name" && -n "$email" ]]; then
+                        echo "name:$name"
+                        echo "email:$email"
+                        echo "gpg_key:$gpg_key"
+                        echo "auto_sign:$auto_sign"
+                        echo "version:2"
+                        return 0
+                    fi
                 fi
             fi
         elif [[ "$version" == "1" ]]; then
@@ -763,9 +732,7 @@ get_user_profile() {
                     echo "name:$name"
                     echo "email:$email"
                     echo "gpg_key:"
-                    echo "ssh_key:"
                     echo "auto_sign:false"
-                    echo "last_used:"
                     echo "version:1"
                     return 0
                 fi
@@ -783,9 +750,7 @@ get_user_profile() {
             echo "name:$name"
             echo "email:$email"
             echo "gpg_key:"
-            echo "ssh_key:"
             echo "auto_sign:false"
-            echo "last_used:"
             echo "version:0"
             return 0
         fi
@@ -794,7 +759,7 @@ get_user_profile() {
     return 1
 }
 
-# Helper function to validate profile completeness
+# Helper function to validate profile completeness (simplified)
 validate_profile_completeness() {
     local username="$1"
     local profile=$(get_user_profile "$username")
@@ -808,55 +773,93 @@ validate_profile_completeness() {
     local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
     local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
     local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
-    local ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
     
     # Check required fields
     if [[ -z "$name" ]]; then
-        issues+=("Missing name")
+        issues+=("name")
     fi
     if [[ -z "$email" ]]; then
-        issues+=("Missing email")
+        issues+=("email")
     fi
     
     # Check GitHub authentication
     if command -v gh >/dev/null 2>&1; then
         if ! gh auth status --hostname github.com >/dev/null 2>&1; then
-            issues+=("GitHub authentication required")
+            issues+=("authentication")
         else
             # Check if this specific user is authenticated
             local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
             if [[ "$current_user" != "$username" ]]; then
-                issues+=("Not currently authenticated as $username")
+                issues+=("authentication")
             fi
         fi
     else
-        issues+=("GitHub CLI not installed")
-    fi
-    
-    # Check GPG key validity
-    if [[ -n "$gpg_key" ]]; then
-        if ! validate_gpg_key "$gpg_key"; then
-            issues+=("GPG key not found in keyring")
-        fi
-    fi
-    
-    # Check SSH key existence
-    if [[ -n "$ssh_key" ]]; then
-        if [[ ! -f "$ssh_key" ]]; then
-            issues+=("SSH key file not found")
-        fi
+        issues+=("authentication")
     fi
     
     # Return results
     if [[ ${#issues[@]} -eq 0 ]]; then
-        echo "✅ Profile complete"
+        echo "✅ Complete"
         return 0
     else
-        echo "⚠️  Issues found:"
-        for issue in "${issues[@]}"; do
-            echo "   - $issue"
-        done
+        echo "⚠️ Missing: $(IFS=', '; echo "${issues[*]}")"
         return 1
+    fi
+}
+
+# Helper function to display simple profile information
+display_simple_profile() {
+    local username="$1"
+    local current_user="${2:-}"
+    local profile=$(get_user_profile "$username")
+    
+    if [[ $? -ne 0 ]]; then
+        echo "❌ No profile found for $username"
+        return 1
+    fi
+    
+    # Get basic info
+    local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
+    local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+    local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
+    
+    # Find user ID and current status
+    local user_id=""
+    if [[ -f "$GH_USERS_CONFIG" ]]; then
+        user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
+    fi
+    local is_current=""
+    [[ "$username" == "$current_user" ]] && is_current=" (current)"
+    
+    # Simple completeness check
+    local status="✅"
+    local status_note=""
+    if [[ -z "$name" || -z "$email" ]]; then
+        status="⚠️"
+        status_note=" [Incomplete]"
+    fi
+    
+    # Display compact format
+    echo "$status $user_id. $username$status_note$is_current"
+    echo "     $name <$email>"
+    
+    # GPG status (simplified)
+    if [[ -n "$gpg_key" ]]; then
+        echo "     GPG: $gpg_key"
+    else
+        echo "     GPG: Not configured"
+    fi
+    
+    # Auth status (simplified)
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        local auth_user=$(gh api user --jq '.login' 2>/dev/null)
+        if [[ "$auth_user" == "$username" ]]; then
+            echo "     Auth: Authenticated"
+        else
+            echo "     Auth: Different user"
+        fi
+    else
+        echo "     Auth: Not authenticated"
     fi
 }
 
@@ -874,10 +877,7 @@ display_rich_profile() {
     local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
     local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
     local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
-    local ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
     local auto_sign=$(echo "$profile" | grep "^auto_sign:" | cut -d':' -f2-)
-    local last_used=$(echo "$profile" | grep "^last_used:" | cut -d':' -f2-)
-    local version=$(echo "$profile" | grep "^version:" | cut -d':' -f2-)
     
     # Find user ID
     local user_id=""
@@ -923,17 +923,6 @@ display_rich_profile() {
         echo "     GPG: Not configured"
     fi
     
-    # SSH information
-    if [[ -n "$ssh_key" ]]; then
-        if [[ -f "$ssh_key" ]]; then
-            echo "     SSH: $ssh_key ✅"
-        else
-            echo "     SSH: $ssh_key ❌"
-        fi
-    else
-        echo "     SSH: Not configured"
-    fi
-    
     # GitHub auth status
     if command -v gh >/dev/null 2>&1; then
         if gh auth status --hostname github.com >/dev/null 2>&1; then
@@ -950,22 +939,179 @@ display_rich_profile() {
         echo "     Auth: ❌ GitHub CLI not available"
     fi
     
-    # Last used
-    if [[ -n "$last_used" ]]; then
-        echo "     Last used: $last_used"
+    return 0
+}
+
+# Helper function to resolve "current" username
+resolve_current_username() {
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        local username=$(gh api user --jq '.login' 2>/dev/null || echo "")
+        if [[ -z "$username" ]]; then
+            echo "❌ Could not detect current GitHub user"
+            return 1
+        fi
+        echo "$username"
+        return 0
+    else
+        echo "❌ GitHub CLI not authenticated or not installed"
+        return 1
+    fi
+}
+
+# Helper function to check if user exists and handle duplication
+handle_user_existence() {
+    local username="$1"
+    
+    if [[ -f "$GH_USERS_CONFIG" ]] && grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
+        echo "⚠️  User $username already exists"
+        read -p "Do you want to recreate the profile with auto-detection? (y/n): " recreate
+        if [[ "$recreate" != "y" && "$recreate" != "Y" ]]; then
+            return 1  # Skip adding
+        fi
+        return 0  # Proceed with adding/updating
+    else
+        # Add to user list
+        echo "$username" >> "$GH_USERS_CONFIG"
+        echo "✅ Added $username to user list"
+        return 0
+    fi
+}
+
+# Helper function to handle auto-detection workflow
+handle_autodetection_workflow() {
+    local username="$1"
+    
+    echo "🔍 Detecting current git configuration..."
+    local current_config=$(detect_git_config "auto")
+    if [[ $? -ne 0 ]]; then
+        return 1  # Auto-detection failed
     fi
     
-    # Version info for debugging
-    if [[ "$version" != "2" ]]; then
-        echo "     Profile version: $version (consider updating)"
+    local detected_name=$(echo "$current_config" | grep "^name:" | cut -d':' -f2-)
+    local detected_email=$(echo "$current_config" | grep "^email:" | cut -d':' -f2-)
+    local detected_gpg_key=$(detect_gpg_key "auto")
+    local detected_auto_sign=$(detect_auto_sign "auto")
+    
+    echo ""
+    echo "📋 Found git config:"
+    echo "   Name: $detected_name"
+    echo "   Email: $detected_email"
+    if [[ -n "$detected_gpg_key" ]]; then
+        echo "   GPG Key: $detected_gpg_key"
+        echo "   Auto-sign: $detected_auto_sign"
     fi
+    echo ""
+    
+    read -p "Use these values for $username profile? (y/n/edit): " choice
+    case "$choice" in
+        y|Y|yes)
+            create_user_profile "$username" "$detected_name" "$detected_email" "false" "$detected_gpg_key" "$detected_auto_sign"
+            ;;
+        e|E|edit)
+            # Create with detected values then show help for updating
+            create_user_profile "$username" "$detected_name" "$detected_email" "false" "$detected_gpg_key" "$detected_auto_sign"
+            echo ""
+            echo "💡 Profile created! Use 'ghs update $username <field> \"<value>\"' to modify fields"
+            ;;
+        *)
+            handle_manual_entry_workflow "$username"
+            ;;
+    esac
     
     return 0
 }
 
-# Helper function to run profile health check for all users
+# Helper function to handle manual entry workflow
+handle_manual_entry_workflow() {
+    local username="$1"
+    
+    echo "📝 Manual profile creation:"
+    read -p "Enter name: " manual_name
+    read -p "Enter email: " manual_email
+    read -p "Enter GPG key (optional): " manual_gpg_key
+    read -p "Enable auto-sign commits? (y/n): " manual_auto_sign
+    
+    if [[ -z "$manual_name" || -z "$manual_email" ]]; then
+        echo "❌ Name and email are required"
+        return 1
+    fi
+    
+    case "$manual_auto_sign" in
+        y|Y|yes)
+            manual_auto_sign="true"
+            ;;
+        *)
+            manual_auto_sign="false"
+            ;;
+    esac
+    
+    create_user_profile "$username" "$manual_name" "$manual_email" "false" "$manual_gpg_key" "$manual_auto_sign"
+}
+
+# Helper function to update profile field
+update_profile_field() {
+    local user_input="$1"
+    local field="$2" 
+    local value="$3"
+    
+    # Resolve user input to username (handle number, username, or "current")
+    local username=""
+    if [[ "$user_input" == "current" ]]; then
+        # Get current GitHub user
+        if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+            username=$(gh api user --jq '.login' 2>/dev/null || echo "")
+            if [[ -z "$username" ]]; then
+                echo "❌ Could not detect current GitHub user"
+                return 1
+            fi
+        else
+            echo "❌ GitHub CLI not authenticated"
+            return 1
+        fi
+    elif [[ "$user_input" =~ ^[0-9]+$ ]]; then
+        # User number
+        username=$(get_user_by_id "$user_input")
+        if [[ $? -ne 0 ]]; then
+            return 1
+        fi
+    else
+        # Username directly
+        username="$user_input"
+    fi
+    
+    # Get current profile
+    local profile=$(get_user_profile "$username")
+    if [[ $? -ne 0 ]]; then
+        echo "❌ No profile found for $username"
+        return 1
+    fi
+    
+    # Extract current values
+    local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
+    local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+    local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
+    local auto_sign=$(echo "$profile" | grep "^auto_sign:" | cut -d':' -f2-)
+    
+    # Update specific field
+    case "$field" in
+        "name") name="$value" ;;
+        "email") email="$value" ;;
+        "gpg") gpg_key="$value" ;;
+        *) echo "❌ Invalid field: $field (use: name, email, gpg)"; return 1 ;;
+    esac
+    
+    # Validate and save
+    if write_profile_entry "$username" "$name" "$email" "$gpg_key" "$auto_sign"; then
+        echo "✅ Updated $field for $username"
+    else
+        echo "❌ Failed to update $field"
+        return 1
+    fi
+}
+
+# Helper function to run profile validation check for all users
 run_profile_health_check() {
-    echo "🏥 Profile Health Check"
+    echo "🔍 Profile Validation"
     echo ""
     
     if [[ ! -f "$GH_USERS_CONFIG" || ! -s "$GH_USERS_CONFIG" ]]; then
@@ -973,7 +1119,7 @@ run_profile_health_check() {
         return 0
     fi
     
-    local all_healthy=true
+    local all_valid=true
     
     while IFS= read -r username; do
         if [[ -n "$username" ]]; then
@@ -994,7 +1140,7 @@ run_profile_health_check() {
                 echo "$validation_result"
             else
                 echo "$validation_result"
-                all_healthy=false
+                all_valid=false
                 
                 # Suggest fixes
                 if echo "$validation_result" | grep -q "GitHub authentication"; then
@@ -1003,16 +1149,13 @@ run_profile_health_check() {
                 if echo "$validation_result" | grep -q "GPG key not found"; then
                     echo "   💡 Fix: Import GPG key or update profile"
                 fi
-                if echo "$validation_result" | grep -q "SSH key file not found"; then
-                    echo "   💡 Fix: Create SSH key or update profile"
-                fi
             fi
             echo ""
         fi
     done < "$GH_USERS_CONFIG"
     
-    if [[ "$all_healthy" == "true" ]]; then
-        echo "🎉 All profiles are healthy!"
+    if [[ "$all_valid" == "true" ]]; then
+        echo "✅ All profiles are valid!"
     else
         echo "⚠️  Some profiles need attention. See suggestions above."
     fi
@@ -1020,31 +1163,7 @@ run_profile_health_check() {
     return 0
 }
 
-# Helper function to update last used timestamp
-update_profile_last_used() {
-    local username="$1"
-    
-    if [[ -z "$username" ]]; then
-        return 1
-    fi
-    
-    local profile=$(get_user_profile "$username")
-    if [[ $? -ne 0 ]]; then
-        return 1
-    fi
-    
-    # Extract current profile data
-    local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-    local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
-    local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
-    local ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
-    local auto_sign=$(echo "$profile" | grep "^auto_sign:" | cut -d':' -f2-)
-    local current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
-    
-    # Rewrite profile with updated timestamp
-    write_profile_entry "$username" "$name" "$email" "$gpg_key" "$ssh_key" "$auto_sign" "$current_time" >/dev/null 2>&1
-    return $?
-}
+
 
 # Helper function to apply user profile (set git config from stored profile)
 apply_user_profile() {
@@ -1116,9 +1235,6 @@ apply_user_profile() {
         git config $git_flags commit.gpgsign false 2>/dev/null
     fi
     
-    # Update last used timestamp
-    update_profile_last_used "$username"
-    
     return 0
 }
 
@@ -1129,7 +1245,7 @@ apply_git_config() {
     local scope="${3:-local}"  # 'local' or 'global'
     
     # Validate inputs
-    if ! validate_profile_input "temp" "$name" "$email" "" ""; then
+    if ! validate_profile_input "temp" "$name" "$email" ""; then
         return 1
     fi
     
@@ -1353,7 +1469,13 @@ ghs() {
                 return 0
             fi
             
-            echo "📋 GitHub Account Profiles:"
+            # Check for detailed flag
+            local use_detailed=false
+            if [[ "$2" == "--detailed" ]]; then
+                use_detailed=true
+            fi
+            
+            echo "📋 User Profiles:"
             echo ""
             
             # Get current user for highlighting
@@ -1365,143 +1487,55 @@ ghs() {
             # Try migration first
             migrate_old_profile_format
             
-            # Display each user with rich profile information
+            # Display each user
             if [[ -f "$GH_USERS_CONFIG" ]]; then
                 while IFS= read -r username; do
                     if [[ -n "$username" ]]; then
-                        display_rich_profile "$username" "$current_user"
+                        if [[ "$use_detailed" == "true" ]]; then
+                            display_rich_profile "$username" "$current_user"
+                        else
+                            display_simple_profile "$username" "$current_user"
+                        fi
                         echo ""
                     fi
                 done < "$GH_USERS_CONFIG"
             fi
             ;;
             
-        "update-profile"|"edit")
-            local input="$2"
-            if [[ -z "$input" ]]; then
-                echo "❌ Usage: ghs edit <username_or_number>"
-                echo "   Use 'ghs profiles' to see available profiles"
-                return 1
-            fi
-            
-            local username=""
-            if [[ "$input" =~ ^[0-9]+$ ]]; then
-                username=$(get_user_by_id "$input")
-                if [[ $? -ne 0 ]]; then
-                    return 1
-                fi
-            else
-                username="$input"
-            fi
-            
-            # Get current profile data
-            local profile=$(get_user_profile "$username")
-            if [[ $? -ne 0 ]]; then
-                echo "❌ No profile found for $username"
-                return 1
-            fi
-            
-            local current_name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-            local current_email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
-            local current_gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
-            local current_ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
-            local current_auto_sign=$(echo "$profile" | grep "^auto_sign:" | cut -d':' -f2-)
-            
-            echo "📝 Editing profile: $username"
+        "edit"|"update-profile")
+            echo "💡 The edit command has been replaced with update for better CLI experience"
             echo ""
-            echo "Current values:"
-            echo "1. Name: $current_name"
-            echo "2. Email: $current_email"
-            echo "3. GPG Key: $current_gpg_key"
-            echo "4. SSH Key: $current_ssh_key"
-            echo "5. Auto-sign: $current_auto_sign"
+            echo "To update profile fields:"
+            echo "  ghs update <user> name \"Full Name\""
+            echo "  ghs update <user> email \"user@email.com\""
+            echo "  ghs update <user> gpg \"GPG_KEY_ID\""
             echo ""
+            echo "Examples:"
+            echo "  ghs update 1 name \"John Smith\""
+            echo "  ghs update current email \"john@newcompany.com\""
+            echo "  ghs update johndoe gpg \"ABC123DEF\""
+            echo ""
+            echo "Use 'ghs profiles --detailed' to see current values"
+            ;;
             
-            while true; do
-                read -p "Select field to edit (1-5, s to save, c to cancel): " choice
-                case "$choice" in
-                    1)
-                        read -p "Enter new name [$current_name]: " new_name
-                        if [[ -n "$new_name" ]]; then
-                            current_name="$new_name"
-                            echo "✅ Name updated"
-                        fi
-                        ;;
-                    2)
-                        read -p "Enter new email [$current_email]: " new_email
-                        if [[ -n "$new_email" ]]; then
-                            current_email="$new_email"
-                            echo "✅ Email updated"
-                        fi
-                        ;;
-                    3)
-                        read -p "Enter new GPG key [$current_gpg_key]: " new_gpg_key
-                        if [[ -n "$new_gpg_key" ]]; then
-                            if validate_gpg_key "$new_gpg_key"; then
-                                current_gpg_key="$new_gpg_key"
-                                echo "✅ GPG key updated and validated"
-                            else
-                                current_gpg_key="$new_gpg_key"
-                                echo "⚠️  GPG key updated but not found in keyring"
-                            fi
-                        elif [[ "$new_gpg_key" == "" ]]; then
-                            current_gpg_key=""
-                            echo "✅ GPG key cleared"
-                        fi
-                        ;;
-                    4)
-                        read -p "Enter new SSH key path [$current_ssh_key]: " new_ssh_key
-                        if [[ -n "$new_ssh_key" ]]; then
-                            current_ssh_key="$new_ssh_key"
-                            if [[ -f "$new_ssh_key" ]]; then
-                                echo "✅ SSH key updated and verified"
-                            else
-                                echo "⚠️  SSH key updated but file not found"
-                            fi
-                        elif [[ "$new_ssh_key" == "" ]]; then
-                            current_ssh_key=""
-                            echo "✅ SSH key cleared"
-                        fi
-                        ;;
-                    5)
-                        read -p "Enable auto-sign commits? (y/n) [$current_auto_sign]: " auto_sign_choice
-                        case "$auto_sign_choice" in
-                            y|Y|yes|true)
-                                current_auto_sign="true"
-                                echo "✅ Auto-sign enabled"
-                                ;;
-                            n|N|no|false)
-                                current_auto_sign="false"
-                                echo "✅ Auto-sign disabled"
-                                ;;
-                            "")
-                                # Keep current value
-                                ;;
-                            *)
-                                echo "❌ Invalid choice. Use y/n"
-                                ;;
-                        esac
-                        ;;
-                    s|S|save)
-                        # Save the profile
-                        if write_profile_entry "$username" "$current_name" "$current_email" "$current_gpg_key" "$current_ssh_key" "$current_auto_sign"; then
-                            echo "✅ Profile saved successfully"
-                            return 0
-                        else
-                            echo "❌ Failed to save profile"
-                            return 1
-                        fi
-                        ;;
-                    c|C|cancel)
-                        echo "❌ Cancelled without saving"
-                        return 0
-                        ;;
-                    *)
-                        echo "❌ Invalid choice. Use 1-5, s, or c"
-                        ;;
-                esac
+        "update")
+            local user_input="$2"
+            local field="$3"
+            local value="$4"
+            
+            if [[ -z "$user_input" || -z "$field" || -z "$value" ]]; then
+                echo "❌ Usage: ghs update <user> <field> \"<value>\""
                 echo ""
-            done
+                echo "Fields: name, email, gpg"
+                echo ""
+                echo "Examples:"
+                echo "  ghs update 1 name \"John Smith\""
+                echo "  ghs update current email \"john@email.com\""
+                echo "  ghs update johndoe gpg \"ABC123DEF\""
+                return 1
+            fi
+            
+            update_profile_field "$user_input" "$field" "$value"
             ;;
             
         "validate")
@@ -1518,7 +1552,7 @@ ghs() {
                     username="$input"
                 fi
                 
-                echo "🏥 Validating profile: $username"
+                echo "🔍 Validating profile: $username"
                 echo ""
                 validate_profile_completeness "$username"
             else
@@ -1528,7 +1562,6 @@ ghs() {
             ;;
             
         "add-user")
-            # Enhanced add-user with auto-detection
             local username="$2"
             if [[ -z "$username" ]]; then
                 echo "❌ Usage: ghs add-user <username>"
@@ -1538,100 +1571,24 @@ ghs() {
             
             # Handle "current" special case
             if [[ "$username" == "current" ]]; then
-                if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-                    username=$(gh api user --jq '.login' 2>/dev/null || echo "")
-                    if [[ -z "$username" ]]; then
-                        echo "❌ Could not detect current GitHub user"
-                        return 1
-                    fi
-                    echo "💡 Adding current GitHub user: $username"
-                else
-                    echo "❌ GitHub CLI not authenticated or not installed"
+                username=$(resolve_current_username)
+                if [[ $? -ne 0 ]]; then
                     return 1
                 fi
+                echo "💡 Adding current GitHub user: $username"
             fi
             
-            # Check if user already exists
-            if [[ -f "$GH_USERS_CONFIG" ]] && grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
-                echo "⚠️  User $username already exists"
-                read -p "Do you want to recreate the profile with auto-detection? (y/n): " recreate
-                if [[ "$recreate" != "y" && "$recreate" != "Y" ]]; then
-                    return 0
-                fi
-            else
-                # Add to user list
-                echo "$username" >> "$GH_USERS_CONFIG"
-                echo "✅ Added $username to user list"
+            # Check if user already exists and handle
+            if ! handle_user_existence "$username"; then
+                return 0
             fi
             
-            # Auto-detect configuration
-            echo "🔍 Detecting current git configuration..."
-            local current_config=$(detect_git_config "auto")
-            if [[ $? -eq 0 ]]; then
-                local detected_name=$(echo "$current_config" | grep "^name:" | cut -d':' -f2-)
-                local detected_email=$(echo "$current_config" | grep "^email:" | cut -d':' -f2-)
-                local detected_gpg_key=$(detect_gpg_key "auto")
-                local detected_auto_sign=$(detect_auto_sign "auto")
-                local detected_ssh_key=$(detect_ssh_key "$username")
-                
-                echo ""
-                echo "📋 Found git config:"
-                echo "   Name: $detected_name"
-                echo "   Email: $detected_email"
-                if [[ -n "$detected_gpg_key" ]]; then
-                    echo "   GPG Key: $detected_gpg_key"
-                    echo "   Auto-sign: $detected_auto_sign"
-                fi
-                if [[ -n "$detected_ssh_key" ]]; then
-                    echo "   SSH Key: $detected_ssh_key"
-                fi
-                echo ""
-                
-                read -p "Use these values for $username profile? (y/n/edit): " choice
-                case "$choice" in
-                    y|Y|yes)
-                        create_user_profile "$username" "$detected_name" "$detected_email" "false" "$detected_gpg_key" "$detected_ssh_key" "$detected_auto_sign"
-                        ;;
-                    e|E|edit)
-                        # Create with detected values then open editor
-                        create_user_profile "$username" "$detected_name" "$detected_email" "false" "$detected_gpg_key" "$detected_ssh_key" "$detected_auto_sign"
-                        echo ""
-                        echo "Opening profile editor..."
-                        ghs edit "$username"
-                        ;;
-                    *)
-                        # Manual entry
-                        echo "📝 Manual profile creation:"
-                        read -p "Enter name: " manual_name
-                        read -p "Enter email: " manual_email
-                        read -p "Enter GPG key (optional): " manual_gpg_key
-                        read -p "Enter SSH key path (optional): " manual_ssh_key
-                        read -p "Enable auto-sign commits? (y/n): " manual_auto_sign
-                        
-                        case "$manual_auto_sign" in
-                            y|Y|yes)
-                                manual_auto_sign="true"
-                                ;;
-                            *)
-                                manual_auto_sign="false"
-                                ;;
-                        esac
-                        
-                        create_user_profile "$username" "$manual_name" "$manual_email" "false" "$manual_gpg_key" "$manual_ssh_key" "$manual_auto_sign"
-                        ;;
-                esac
-            else
+            # Try auto-detection workflow, fallback to manual if needed
+            if ! handle_autodetection_workflow "$username"; then
                 echo "⚠️  Could not detect git configuration"
-                echo "📝 Manual profile creation:"
-                read -p "Enter name: " manual_name
-                read -p "Enter email: " manual_email
-                
-                if [[ -z "$manual_name" || -z "$manual_email" ]]; then
-                    echo "❌ Name and email are required"
+                if ! handle_manual_entry_workflow "$username"; then
                     return 1
                 fi
-                
-                create_user_profile "$username" "$manual_name" "$manual_email" "false"
             fi
             
             echo ""
@@ -1877,9 +1834,9 @@ ghs() {
             echo "USER MANAGEMENT:"
             echo "  ghs users                  Show numbered list of users"
             echo "  ghs remove-user <user>     Remove user by name or number"
-            echo "  ghs profiles               Show rich user profiles with health status"
-            echo "  ghs edit <user>            Interactive profile editing"
-            echo "  ghs validate [user]        Run profile health check (all users or specific)"
+            echo "  ghs profiles               Show user profiles (add --detailed for rich view)"
+            echo "  ghs update <user> <field> \"<value>\"  Update profile field (name, email, gpg)"
+            echo "  ghs validate [user]        Run profile validation check (all users or specific)"
             echo ""
             echo "PROJECT & STATUS:"
             echo "  ghs status                 Show detailed current status"

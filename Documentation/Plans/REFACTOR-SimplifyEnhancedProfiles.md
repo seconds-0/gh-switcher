@@ -452,38 +452,39 @@ fi
 
 ## Implementation Checklist
 
-### Phase 1: Remove YAGNI Features ⏱️ 1 hour
-- [ ] Remove `detect_ssh_key()` function (~25 lines)
-- [ ] Remove SSH parameters from all functions
-- [ ] Remove `update_profile_last_used()` function (~25 lines)  
-- [ ] Remove timestamp parameters from all functions
-- [ ] Remove version debugging display (~5 lines)
-- [ ] Update profile format to v2.1 (no SSH/timestamps)
-- [ ] Test basic functionality still works
+### Phase 1: Remove YAGNI Features ⏱️ 1 hour ✅ COMPLETED
+- [x] Remove `detect_ssh_key()` function (~25 lines)
+- [x] Remove SSH parameters from all functions
+- [x] Remove `update_profile_last_used()` function (~25 lines)  
+- [x] Remove timestamp parameters from all functions
+- [x] Remove version debugging display (~5 lines)
+- [x] Update profile format to v2.1 (no SSH/timestamps)
+- [x] Test basic functionality still works
 
-### Phase 2: Simplify UX ⏱️ 2 hours  
-- [ ] Create `display_simple_profile()` function
-- [ ] Replace `display_rich_profile()` calls with simple version
-- [ ] Add `--detailed` flag for rich display
-- [ ] Remove interactive editor while loop (~80 lines)
-- [ ] Create `update_profile_field()` function
-- [ ] Update `ghs update` command with number/username/current patterns
-- [ ] Simplify health check output and language
-- [ ] Remove medical metaphors from all functions
-- [ ] Test UX improvements
+### Phase 2: Simplify UX ⏱️ 2 hours ✅ COMPLETED
+- [x] Create `display_simple_profile()` function
+- [x] Replace `display_rich_profile()` calls with simple version
+- [x] Add `--detailed` flag for rich display
+- [x] Remove interactive editor while loop (~80 lines)
+- [x] Create `update_profile_field()` function
+- [x] Update `ghs update` command with number/username/current patterns
+- [x] Simplify health check output and language
+- [x] Remove medical metaphors from all functions (🏥 → 🔍, "healthy" → "valid")
+- [x] Test UX improvements
 
-### Phase 3: Reduce Function Complexity ⏱️ 2 hours
+### Phase 3: Reduce Function Complexity ⏱️ 2 hours 🔄 IN PROGRESS
 - [ ] Split `display_rich_profile()` into 4 smaller functions
-- [ ] Split add-user logic into 3 smaller functions  
+- [x] Split add-user logic into 4 helper functions (100+ lines → 25 lines)
+- [x] Created helper functions: `resolve_current_username()`, `handle_user_existence()`, `handle_autodetection_workflow()`, `handle_manual_entry_workflow()`
 - [ ] Merge `detect_gpg_key()` and `detect_auto_sign()` into single function
 - [ ] Ensure no function exceeds 40 lines
 - [ ] Test function refactoring
 
-### Phase 4: Align with Philosophy ⏱️ 1 hour
+### Phase 4: Align with Philosophy ⏱️ 1 hour ⏸️ PENDING
 - [ ] Reduce emoji usage from 17 to 5 types
 - [ ] Replace all medical metaphors with neutral language
 - [ ] Simplify technical jargon in user-facing messages
-- [ ] Update help text to include `ghs update` command and patterns
+- [x] Update help text to include `ghs update` command and patterns
 - [ ] Test final polish
 
 ### Verification Steps
@@ -624,3 +625,47 @@ ghs update 3 email "client@startup.com"   # Client
 ghs switch 2
 ghs profiles  # See simple display
 ```
+
+## Implementation Notes - Progress Update
+
+### Work Completed (Phases 1-2 ✅, Phase 3 🔄)
+
+**Phase 1 & 2 are COMPLETE** - The core refactoring goals have been achieved:
+
+1. **Successfully removed YAGNI features**: SSH detection, timestamp tracking, version debugging
+2. **Simplified UX dramatically**: Interactive editor replaced with direct CLI commands  
+3. **Established `ghs update` pattern**: Consistent with existing numbered user system
+4. **Removed medical metaphors**: "🏥 Profile Health Check" → "🔍 Profile Validation"
+5. **Added simple/detailed options**: Default simple view with `--detailed` flag for power users
+6. **Significant function simplification**: add-user command reduced from 100+ lines to 25 lines
+
+**Key Helper Functions Added:**
+- `resolve_current_username()` - Clean "current" user detection
+- `handle_user_existence()` - User duplication logic  
+- `handle_autodetection_workflow()` - Auto-detection flow
+- `handle_manual_entry_workflow()` - Manual entry flow
+- `update_profile_field()` - Direct field updates
+
+**Quantified Improvements:**
+- **Code reduction**: ~150+ lines removed through YAGNI elimination
+- **Function complexity**: Major functions broken into smaller, focused helpers
+- **UX simplification**: Multi-step interactive flows → single CLI commands
+- **Philosophy alignment**: Medical metaphors removed, language simplified
+
+### Remaining Work (Phase 3-4 completion)
+
+The major philosophical and UX goals are achieved. Remaining items:
+- Split large `display_rich_profile()` function (currently 103 lines)
+- Merge detection utility functions  
+- Final emoji reduction pass
+- Polish and verification
+
+### Impact Assessment
+
+✅ **CORE PROBLEM SOLVED**: Tool no longer feels like enterprise software
+✅ **PHILOSOPHY RESTORED**: "Simple over complex" principle upheld
+✅ **UX IMPROVED**: Faster workflows, less cognitive load  
+✅ **MAINTAINABILITY**: Smaller functions, clearer responsibilities
+✅ **FEATURE PARITY**: All valuable functionality preserved
+
+The enhanced profile system now provides its intended value without the complexity overhead that violated project principles. Major success in balancing power with simplicity.
