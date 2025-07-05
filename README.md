@@ -1,161 +1,141 @@
-# 🎯 GitHub Project Switcher
+# 🎯 GitHub Project Switcher (gh-switcher)
 
-A lightweight, secure solution for project-specific GitHub account switching.
+Lightweight, secure GitHub account switcher for the command line. Manage multiple GitHub accounts (personal, work, client) with project-specific memory and numbered user references for easy switching.
 
-## Why This Tool?
+## Features
 
-When working on multiple projects with different GitHub accounts (personal, work, clients), you face three problems:
-1. **Forgetting usernames**: Hard to remember exact GitHub usernames (was it `work-user` or `work-username`?)
-2. **Forgetting which account goes with which project**: Easy to accidentally push to the wrong account
-3. **Not knowing what's available**: What accounts do I have? What can I do right now?
-
-This tool solves all three problems with **numbered users**, **project-specific memory**, and a **smart dashboard** that shows you exactly what you need to know.
+- 🔢 **Numbered Users**: Reference users by simple numbers (1, 2, 3) instead of usernames
+- 📁 **Project Memory**: Projects remember their associated GitHub account
+- 🎯 **Smart Dashboard**: Running `ghs` shows current status and available actions
+- ⚡ **Simple Commands**: `ghs switch 2`, `ghs assign 1`, etc.
+- 🔐 **Enhanced Profiles**: Store name, email, GPG keys, and auto-sign preferences
+- 🤖 **Automation-Friendly**: All commands work non-interactively for scripting
 
 ## Installation
 
-### 🎯 Super Easy Install
-
-Clone and install in one command:
+### Quick Install
 
 ```bash
-git clone https://github.com/personal-acct/gh-switcher.git
-cd gh-switcher
+# Download and make executable
+curl -o gh-switcher.sh https://raw.githubusercontent.com/user/repo/main/gh-switcher.sh
+chmod +x gh-switcher.sh
+
+# Install to your shell profile
 ./gh-switcher.sh install
 ```
 
-**That's it!** The install command auto-detects your shell (zsh/bash) and adds the switcher to your profile.
-
-**Alternative installation methods:**
-```bash
-# Using npm script
-npm run install-global
-
-# Manual shell profile setup
-echo "source $(pwd)/gh-switcher.sh" >> ~/.zshrc && source ~/.zshrc
-```
-
-After installation, restart your terminal or run `source ~/.zshrc`, then use `ghs` anywhere!
-
-## Usage
-
-### 🚀 Super Easy Way: Numbered Users
+### Manual Install
 
 ```bash
-# First, add your users to get numbered IDs
-ghs add-user personal-acct
-ghs add-user work-account
-# ✅ Added personal-acct to user list
-# ✅ Added work-account to user list
-# 📋 Available users:
-#   🟢 1. personal-acct (current)
-#   ⚪ 2. work-account
-
-# Assign user to project (much easier!)
-ghs assign 2
-# 💡 Using user #2: work-account
-# ✅ Assigned work-account as default account for my-project
-
-# See smart dashboard with current status and quick actions
-ghs
-# 🎯 GitHub Project Switcher
-# 
-# 📍 Current project: my-project
-# 🔑 Current user: personal-acct (#1)
-# ⚠️  Project should use: work-account (#2)
-#
-# 📋 Available users:
-#   🟢 1. personal-acct (current)
-#   ⚪ 2. work-account
-#
-# ⚡ Quick actions:
-#   ghs switch 1    # Switch to personal-acct
-#   ghs switch 2    # Switch to work-account
-#   ghs assign 1    # Assign personal-acct to project
-#   ghs assign 2    # Assign work-account to project
-
-# Quick switch to any user by number
-ghs switch 1
-# ✅ Switched to personal-acct (#1)
-
-# Check current status (shows user numbers!)
-ghs status
-# 📍 Current project: my-project
-# 🔑 Current GitHub user: personal-acct (#1)
-# ⚠️  This project should use: work-account (#2)
-
-# See all users with numbers
-ghs users
-# 📋 Available users:
-#   🟢 1. personal-acct (current)
-#   ⚪ 2. work-account
-
-# List all configured projects (shows user numbers!)
-ghs list
-# 📋 Configured project accounts:
-#   🟢 my-project → work-account (#2) (current project)
-
-# Get help
-ghs help
+# Add to your shell profile
+echo "source $(pwd)/gh-switcher.sh" >> ~/.zshrc
+source ~/.zshrc
 ```
 
-### 🔧 Alternative: Direct Script Use
-
-You can also run the script directly without installing:
+## Quick Start
 
 ```bash
-# Assign account to project
-./gh-switcher.sh assign work-username
+# Add your GitHub accounts
+ghs add-user alice --name "Alice Smith" --email "alice@work.com"
+ghs add-user bob --name "Bob Jones" --email "bob@personal.com"
 
-# Switch to project account (automatic)
-./gh-switcher.sh
+# Switch between accounts by number
+ghs switch 1    # Switch to alice
+ghs switch 2    # Switch to bob
 
-# Check current status  
-./gh-switcher.sh status
+# Assign account to current project
+ghs assign 1    # Use alice for this project
 
-# List all configured projects
-./gh-switcher.sh list
+# View dashboard
+ghs             # Shows current status and quick actions
 ```
 
-## Security Features
+## Commands
 
-- **Input validation**: Username format validation prevents command injection
-- **Atomic file operations**: Configuration updates are atomic to prevent corruption
-- **Minimal permissions**: Only requires read/write to `~/.gh-project-accounts`
-- **Delegates to official GitHub CLI**: No custom authentication logic
+### Daily Workflow
 
-## Configuration File
+- `ghs` - Show smart dashboard with current status
+- `ghs switch <number>` - Switch to user by number
+- `ghs assign <number>` - Assign user as project default
 
-Project accounts are stored in `~/.gh-project-accounts` with the format:
+### User Management
+
+- `ghs add-user <username>` - Add user with profile fields
+- `ghs add-user current` - Add currently authenticated GitHub user
+- `ghs add-user <user> --name "Name" --email "email@domain" --gpg <key> --auto-sign true --force`
+- `ghs users` - Show numbered list of users
+- `ghs remove-user <user>` - Remove user by name or number
+- `ghs profiles` - Show user profiles (add `--verbose` for detailed view)
+- `ghs update <user> <field> "<value>"` - Update profile field (name, email, gpg)
+- `ghs validate [user]` - Run profile validation check
+
+### Project & Status & Help
+
+- `ghs status` - Show detailed current status
+- `ghs list` - List all configured projects
+- `ghs help` - Display full reference of all commands
+- `ghs install` - Install to shell profile
+- `ghs uninstall` - Remove from shell profile
+
+## Profile Format
+
+gh-switcher uses a simple v3 profile format:
+
 ```
-project-name=github-username
+username:name:email[:gpg_key][:auto_sign]
 ```
 
-## Key Benefits
+All fields are plain text (no base64 encoding). GPG key and auto-sign are optional.
 
-### 🎯 **Smart Dashboard & Numbered Users**
-- **Discoverable**: Run `ghs` to see current status and all available actions
-- **Contextual**: Shows exactly what you need to know: current user, project preference, and quick commands
-- **Add once, use everywhere**: `ghs add-user personal-acct` → now you can use `#1` everywhere  
-- **No more username typos**: `ghs assign 2` instead of `ghs assign my-complex-username`
-- **Visual user list**: See all your accounts numbered and know which is currently active
-- **Super fast switching**: `ghs switch 1` switches immediately
+### Examples
 
-### 🔒 **Security & Reliability** 
-- **Simple**: ~120 lines vs 270+ lines of complex alternatives
-- **Secure**: Input validation, atomic operations, no shell injection risks
-- **Reliable**: Delegates to official `gh` CLI for all authentication
-- **Maintainable**: Easy to understand, modify, and audit
-- **Focused**: Solves the core problems without unnecessary complexity
+```bash
+# Add user with all fields
+ghs add-user alice --name "Alice Smith" --email "alice@work.com" --gpg "ABC123DEF" --auto-sign true
 
-## Prerequisites
+# Add minimal user (auto-detects from git config)
+ghs add-user bob --email "bob@personal.com"
 
-- [GitHub CLI](https://cli.github.com/) must be installed
-- Your GitHub accounts must be authenticated with `gh auth login`
+# Update specific fields
+ghs update alice email "alice@newcompany.com"
+ghs update bob gpg "XYZ789GHI"
+```
 
-## Troubleshooting
+## Configuration Files
 
-**"Failed to switch to username"**: The account may not be authenticated. Run `gh auth login` to add the account.
+- `~/.gh-users` - List of usernames (one per line)
+- `~/.gh-user-profiles` - Enhanced profile data (v3 format)
+- `~/.gh-project-accounts` - Project to account mapping
 
-**"No account configured"**: Run `ghs assign <username>` in your project directory to configure it.
+## Requirements
 
-**"GitHub CLI not found"**: Install the GitHub CLI from https://cli.github.com/ 
+- [GitHub CLI](https://cli.github.com/) (`gh`) - for authentication
+- Git - for repository operations
+- Bash/Zsh shell
+
+## Performance
+
+- Commands complete in <100ms (enforced by automated benchmarks)
+- Optimized for minimal network calls and fast switching
+- Caches GitHub API responses for better performance
+
+## Automation & Scripting
+
+All commands are designed to work non-interactively:
+
+```bash
+# Script example
+for project in project1 project2 project3; do
+  cd "$project"
+  ghs assign work-account
+  git push
+done
+```
+
+## Contributing
+
+See [CHANGELOG.md](CHANGELOG.md) for recent changes and [docs/ROADMAP.md](docs/ROADMAP.md) for future plans.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file.
