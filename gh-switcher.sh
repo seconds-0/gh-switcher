@@ -19,117 +19,107 @@
 # Comprehensive test comments are embedded throughout this codebase 
 # to guide future test implementation. See Documentation/Plans/TEST-ComprehensiveTestPlan.md
 # for complete testing requirements. Key areas requiring tests:
-# - File atomicity and data corruption protection
-# - Profile migration safety and backward compatibility  
-# - User workflow integration (add/switch/update commands)
-# - Input validation and security (injection resistance)
-# - Error handling and graceful failures
 # Total: 15+ test functions covering 100+ test cases
 
-#═══════════════════════════════════════════════════════════════════════════════
-# LIBRARY TRANSFORMATION NOTES
-#═══════════════════════════════════════════════════════════════════════════════
-# 
-# TO MAKE THIS A DISTRIBUTABLE LIBRARY, THE FOLLOWING CHANGES ARE NEEDED:
-#
-# 1. CONFIGURATION SYSTEM:
-#    Current: Hard-coded ~/.gh-* paths
-#    Library: Configurable base directory with environment variable support
-#    ```bash
-#    GH_SWITCHER_DIR="${GH_SWITCHER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh-switcher}"
-#    GH_SWITCHER_NAMESPACE="${GH_SWITCHER_NAMESPACE:-default}"
-#    GH_PROJECT_CONFIG="$GH_SWITCHER_DIR/$GH_SWITCHER_NAMESPACE/projects"
-#    GH_USERS_CONFIG="$GH_SWITCHER_DIR/$GH_SWITCHER_NAMESPACE/users"
-#    ```
-#
-# 2. XDG COMPLIANCE:
-#    Current: Uses ~/.gh-* regardless of OS
-#    Library: Follow OS conventions
-#    ```bash
-#    if [[ "$OSTYPE" == "darwin"* ]]; then
-#        CONFIG_DIR="$HOME/Library/Application Support/gh-switcher"
-#    else
-#        CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gh-switcher"
-#    fi
-#    ```
-#
-# 3. NAMESPACE ISOLATION:
-#    Current: All tools share same user list and project mappings
-#    Library: Each consuming tool gets its own namespace
-#    Example: my-tool uses ~/.config/gh-switcher/my-tool/{users,projects}
-#
-# 4. API EXTRACTION:
-#    Current: Direct function calls mixed with UI
-#    Library: Clean separation between core logic and presentation
-#    ```bash
-#    # Core API functions (return data, no direct output)
-#    gh_switcher_list_users() { ... }
-#    gh_switcher_add_user() { ... }
-#    gh_switcher_get_project_user() { ... }
-#    
-#    # UI/presentation functions
-#    gh_switcher_show_dashboard() { ... }
-#    gh_switcher_show_user_list() { ... }
-#    ```
-#
-# 5. ERROR HANDLING:
-#    Current: Prints errors and exits
-#    Library: Return error codes, let caller handle presentation
-#    ```bash
-#    # Instead of: echo "❌ Error" && return 1
-#    # Library: return error codes, provide error messages separately
-#    ```
-#
-# 6. INITIALIZATION/CLEANUP:
-#    Current: No setup/teardown
-#    Library: Explicit initialization and cleanup functions
-#    ```bash
-#    gh_switcher_init() { # Create directories, validate dependencies }
-#    gh_switcher_cleanup() { # Remove config, uninstall }
-#    ```
-#
-# 7. PACKAGE MANAGEMENT:
-#    Current: Manual script sourcing
-#    Library: Proper package structure for npm/brew/apt distribution
-#    - bin/gh-switcher (main executable)
-#    - lib/gh-switcher-core.sh (core functions)
-#    - share/man/gh-switcher.1 (man page)
-#    - etc/gh-switcher/config (default config)
-#
-# 8. CONFIGURATION FILE:
-#    Current: Environment variables only
-#    Library: Support config file + environment variables
-#    ~/.config/gh-switcher/config with INI or TOML format
-#
-# 9. MIGRATION SYSTEM:
-#    Current: No versioning or migration
-#    Library: Handle config format changes between versions
-#    Detect old ~/.gh-* files and migrate to new structure
-#
-# 10. SECURITY HARDENING:
-#     Current: Basic input validation
-#     Library: More comprehensive validation, sandboxing options
-#
-#═══════════════════════════════════════════════════════════════════════════════
-
-# CURRENT SIMPLE IMPLEMENTATION (perfect for personal/team use)
-# Hard-coded paths - works great for single-user scenarios
+# Configuration paths
 GH_PROJECT_CONFIG="$HOME/.gh-project-accounts"
 GH_USERS_CONFIG="$HOME/.gh-users"
 GH_USER_PROFILES="$HOME/.gh-user-profiles"
 
-# NOTE: For library version, these would become:
-# GH_PROJECT_CONFIG="$GH_SWITCHER_DIR/$GH_SWITCHER_NAMESPACE/projects"  
-# GH_USERS_CONFIG="$GH_SWITCHER_DIR/$GH_SWITCHER_NAMESPACE/users"
+# =====================
+# V3 PROFILE HELPERS (Simplified plain-text format)
+# Format: username:name:email[:gpg_key][:auto_sign]
+# =====================
+
+# Validate individual field against minimal rules (see plan)
+validate_profile_field() {
+    local field_name="$1"; local value="$2"
+    
+    # Reject control characters in all fields
+    if [[ "$value" =~ [[:cntrl:]] ]]; then
+        return 1
+    fi
+    
+    case "$field_name" in
+        username)
+            [[ "$value" =~ ^[A-Za-z0-9-]{1,39}$ ]] || return 1
+            ;;
+        name)
+            [[ "$value" != *":"* && ${#value} -le 255 ]] || return 1
+            ;;
+        email)
+            [[ "$value" == *"@"* && "$value" == *"."* && "$value" != *":"* && "$value" != *" "* ]] || return 1
+            ;;
+        gpg_key)
+            [[ -z "$value" || "$value" =~ ^[A-F0-9]{8,40}$ ]] || return 1
+            ;;
+        auto_sign)
+            [[ -z "$value" || "$value" == "true" || "$value" == "false" ]] || return 1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+# Parse a single v3 profile line and emit key:value pairs
+parse_profile_line_v3() {
+    local line="$1"
+    IFS=':' read -r username name email gpg_key auto_sign <<<"$line"
+    # Basic sanity check
+    if [[ -z "$username" || -z "$name" || -z "$email" ]]; then
+        return 1
+    fi
+    echo "username:$username"
+    echo "name:$name"
+    echo "email:$email"
+    echo "gpg_key:${gpg_key:-}"
+    echo "auto_sign:${auto_sign:-}"
+    echo "version:3"
+}
+
+# Atomic writer for v3 format (wrapper around simplified validation)
+write_profile_entry_v3() {
+    local username="$1"; local name="$2"; local email="$3"; local gpg_key="${4:-}"; local auto_sign="${5:-}"
+
+    # Validate fields
+    for f in username name email gpg_key auto_sign; do
+        local val="${!f}"
+        if ! validate_profile_field "$f" "$val"; then
+            echo "❌ Invalid $f value"
+            return 1
+        fi
+    done
+
+    # Ensure profile dir exists
+    mkdir -p "$(dirname "$GH_USER_PROFILES")" 2>/dev/null || true
+
+    local temp="${GH_USER_PROFILES}.tmp.$$"
+    trap 'rm -f "$temp"' EXIT
+
+    # Remove old entry if exists, write others untouched
+    if [[ -f "$GH_USER_PROFILES" ]]; then
+        grep -v "^$username:" "$GH_USER_PROFILES" > "$temp" || true
+    fi
+
+    # Build line (maintain 5 colon positions even for missing optional fields)
+    local line="$username:$name:$email:$gpg_key:$auto_sign"
+    echo "$line" >> "$temp"
+
+    chmod 600 "$temp"
+    mv "$temp" "$GH_USER_PROFILES"
+    trap - EXIT
+    return 0
+}
+
+# Minimal base64 decode shim for legacy v1/v2 profiles
+# Added during PostV3 cleanup – keep until legacy formats are removed entirely
+decode_profile_value() {
+    printf '%s' "$1" | base64 --decode 2>/dev/null
+}
 
 # Helper function to add a user to the global list
-#
-# LIBRARY TRANSFORMATION NOTES:
-# - Would become: gh_switcher_add_user() with return codes instead of direct output
-# - Error messages would be returned via separate function: gh_switcher_get_last_error()
-# - UI output would be handled by caller: gh_switcher_show_add_user_result()
-# - Would need namespace support: check $GH_SWITCHER_NAMESPACE/users instead of global file
-# - Would need initialization check: ensure config directory exists before writing
 add_user() {
     local username="$1"
     if [[ -z "$username" ]]; then
@@ -138,7 +128,6 @@ add_user() {
     fi
     
     # Validate username format
-    # LIBRARY NOTE: This validation would be extracted to gh_switcher_validate_username()
     if [[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
         echo "❌ Invalid username format"
         return 1
@@ -146,8 +135,8 @@ add_user() {
     
     # Handle special "current" keyword
     if [[ "$username" == "current" ]]; then
-        if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-            username=$(gh api user --jq '.login' 2>/dev/null || echo "")
+        if check_gh_auth; then
+            username=$(get_current_github_user)
             if [[ -z "$username" ]]; then
                 echo "❌ Could not detect current GitHub user"
                 echo "   Make sure you're authenticated with: gh auth login"
@@ -162,15 +151,12 @@ add_user() {
     fi
     
     # Check if user already exists
-    # LIBRARY NOTE: Would need to ensure config directory exists first
-    # mkdir -p "$(dirname "$GH_USERS_CONFIG")" 2>/dev/null
     if [[ -f "$GH_USERS_CONFIG" ]] && grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
         echo "⚠️  User $username already exists in the list"
         return 0
     fi
     
     # Add user to the list
-    # LIBRARY NOTE: Would need atomic write operation with proper error handling
     echo "$username" >> "$GH_USERS_CONFIG"
     echo "✅ Added $username to user list"
     
@@ -178,18 +164,41 @@ add_user() {
     create_user_profile "$username" "" "" "true"
     
     # Show current list with numbers
-    # LIBRARY NOTE: This UI coupling would be removed - caller decides what to show
     list_users
 }
 
+# Helper function to extract field from profile data (reduces duplication)
+field() {
+    local data="$1"
+    local field_name="$2"
+    echo "$data" | grep "^$field_name:" | cut -d':' -f2-
+}
+
+# Helper function to get current GitHub username (cached for performance)
+get_current_github_user() {
+    # Use global cache if available and recent
+    if [[ -n "${_GH_CURRENT_USER_CACHE:-}" ]]; then
+        echo "$_GH_CURRENT_USER_CACHE"
+        return 0
+    fi
+    
+    # Fetch and cache
+    if check_gh_auth; then
+        _GH_CURRENT_USER_CACHE=$(gh api user --jq '.login' 2>/dev/null || echo "")
+        echo "$_GH_CURRENT_USER_CACHE"
+        return 0
+    else
+        echo ""
+        return 1
+    fi
+}
+
+# Helper function to clear GitHub user cache (call when switching users)
+clear_github_user_cache() {
+    unset _GH_CURRENT_USER_CACHE
+}
+
 # Helper function to list all users with numbers
-#
-# LIBRARY TRANSFORMATION NOTES:
-# - Would become: gh_switcher_get_users() returning structured data (JSON/array)
-# - Current user detection would be separate: gh_switcher_get_current_user()
-# - UI formatting would be separate: gh_switcher_format_user_list()
-# - Would support filtering/sorting options
-# - Would handle namespace isolation automatically
 list_users() {
     if [[ ! -f "$GH_USERS_CONFIG" || ! -s "$GH_USERS_CONFIG" ]]; then
         echo "📋 No users configured yet"
@@ -199,46 +208,27 @@ list_users() {
     
     echo "📋 Available users:"
     local i=1
+    
+    # Get current user once for the entire loop
+    local current_user=""
+    if check_gh_auth; then
+        current_user=$(get_current_github_user)
+    fi
+    
     while IFS= read -r username; do
         if [[ -n "$username" ]]; then
             # Check if this is the current user
-            # LIBRARY NOTE: This external dependency check would be abstracted
-            # gh_switcher_is_gh_available() && gh_switcher_get_current_user()
-            if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-                local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
-                if [[ "$username" == "$current_user" ]]; then
-                    echo "  ✅ $i. $username (current)"
-                else
-                    echo "     $i. $username"
-                fi
+            if [[ "$username" == "$current_user" ]]; then
+                echo "  ✅ $i. $username (current)"
             else
                 echo "     $i. $username"
             fi
             ((i++))
         fi
     done < "$GH_USERS_CONFIG"
-    
-    # LIBRARY NOTE: Would return structured data instead of printing:
-    # {
-    #   "users": [
-    #     {"id": 1, "username": "personal-acct", "is_current": true},
-    #     {"id": 2, "username": "work-account", "is_current": false}
-    #   ],
-    #   "current_user": "personal-acct",
-    #   "gh_available": true
-    # }
 }
 
 # Helper function to get username by ID number
-# TEST: test_get_user_by_id()
-# - Invalid input: non-numeric (should return 1, show error)
-# - Invalid input: negative number (should return 1)
-# - Missing config file (should return 1, show error)
-# - Empty config file (should return 1, show error) 
-# - User ID too high (ID=5 but only 3 users, should return 1)
-# - Valid ID=1 with users (should return 0, echo username)
-# - Valid ID=3 with 3 users (should return 0, echo username)
-# - Edge case: ID=0 (should return 1)
 get_user_by_id() {
     local user_id="$1"
     
@@ -248,7 +238,7 @@ get_user_by_id() {
     fi
     
     if [[ ! -f "$GH_USERS_CONFIG" || ! -s "$GH_USERS_CONFIG" ]]; then
-        echo "❌ No users configured. Use 'ghs add-user <username>' first."
+        echo "❌ No users configured. Use 'ghs users' to see available users."
         return 1
     fi
     
@@ -262,11 +252,6 @@ get_user_by_id() {
 }
 
 # Helper function to check if git is available and working
-# TEST: test_check_git_availability()
-# - Mock git command to test not found case (should return 1)
-# - Mock git --version to fail (should return 1) 
-# - Normal case with working git (should return 0)
-# - Test in container without git installed
 check_git_availability() {
     if ! command -v git >/dev/null 2>&1; then
         return 1
@@ -278,6 +263,53 @@ check_git_availability() {
     fi
     
     return 0
+}
+
+# Helper function to check GitHub CLI authentication (DRY)
+check_gh_auth() {
+    command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1
+}
+
+# Helper function to detect shell profile (DRY)
+detect_shell_profile() {
+    if [[ "$SHELL" == *zsh* ]] || [[ -n "$ZSH_VERSION" ]]; then
+        echo "$HOME/.zshrc"
+        return 0
+    elif [[ "$SHELL" == *bash* ]] || [[ -n "$BASH_VERSION" ]]; then
+        echo "$HOME/.bashrc"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Helper function to check if input is a numeric user ID (focused validation)
+is_numeric_user_id() {
+    local input="$1"
+    [[ "$input" =~ ^[0-9]+$ ]]
+}
+
+# Helper function to resolve current user (focused current user logic)
+resolve_current_user() {
+    if check_gh_auth; then
+        get_current_github_user
+    else
+        echo "❌ GitHub CLI not authenticated or not installed" >&2
+        return 1
+    fi
+}
+
+# Helper function to resolve user input to username (clean orchestration)
+resolve_user_by_input() {
+    local user_input="$1"
+    
+    if [[ "$user_input" == "current" ]]; then
+        resolve_current_user
+    elif is_numeric_user_id "$user_input"; then
+        get_user_by_id "$user_input"
+    else
+        echo "$user_input"
+    fi
 }
 
 # Helper function to detect current git configuration with comprehensive fallbacks
@@ -383,13 +415,6 @@ detect_auto_sign() {
 
 
 # Helper function to validate GPG key
-# TEST: test_validate_gpg_key()
-# - Empty key (should return 0 - valid case)
-# - Missing gpg command (mock command -v to fail, should return 1)
-# - Invalid key ID (mock gpg --list-secret-keys to fail, should return 1)
-# - Valid key ID (mock gpg --list-secret-keys to succeed, should return 0)
-# - Special characters in key ID (test injection resistance)
-# - Very long key ID (test buffer limits)
 validate_gpg_key() {
     local gpg_key="$1"
     
@@ -410,161 +435,14 @@ validate_gpg_key() {
     fi
 }
 
-# Helper function to validate input for profile creation
-validate_profile_input() {
-    local username="$1"
-    local name="$2" 
-    local email="$3"
-    local gpg_key="$4"
-    
-    # Username validation
-    if [[ -z "$username" ]]; then
-        echo "❌ Username cannot be empty"
-        return 1
-    fi
-    
-    if [[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-        echo "❌ Username contains invalid characters (only letters, numbers, dots, underscores, and hyphens allowed)"
-        return 1
-    fi
-    
-    # Name validation
-    if [[ -z "$name" ]]; then
-        echo "❌ Name cannot be empty"
-        return 1
-    fi
-    
-    if [[ ${#name} -gt 255 ]]; then
-        echo "❌ Name too long (max 255 characters)"
-        return 1
-    fi
-    
-    # Email validation
-    if [[ -z "$email" ]]; then
-        echo "❌ Email cannot be empty"
-        return 1
-    fi
-    
-    if [[ ! "$email" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
-        echo "❌ Invalid email format"
-        return 1
-    fi
-    
-    if [[ ${#email} -gt 255 ]]; then
-        echo "❌ Email too long (max 255 characters)"
-        return 1
-    fi
-    
-    # GPG key validation (optional)
-    if [[ -n "$gpg_key" ]]; then
-        if [[ ${#gpg_key} -gt 255 ]]; then
-            echo "❌ GPG key too long (max 255 characters)"
-            return 1
-        fi
-    fi
-    
-    return 0
-}
+# (DELETED: validate_profile_input removed in v3 simplification)
 
-# Helper function to encode profile data safely
-# TEST: test_encode_profile_value()
-# - Empty string (should return empty encoded string)
-# - Simple ASCII text (should return valid base64)
-# - Unicode characters (should handle UTF-8 properly)
-# - Special characters: newlines, quotes, spaces (should encode safely)
-# - Very long strings (test performance/limits)
-# - Binary data (should handle any input)
-encode_profile_value() {
-    local value="$1"
-    # Use base64 encoding to handle any special characters
-    echo "$value" | base64 | tr -d '\n'
-}
-
-# Helper function to decode profile data safely
-# TEST: test_decode_profile_value()
-# - Valid base64 input (should decode correctly)
-# - Invalid base64 input (should return empty string, not crash)
-# - Empty input (should return empty string)
-# - Malformed base64 (should fail gracefully)
-# - Round-trip test: encode→decode should equal original
-# - Test with all encode test cases to ensure reversibility
-decode_profile_value() {
-    local encoded_value="$1"
-    echo "$encoded_value" | base64 -d 2>/dev/null || echo ""
-}
+# (DELETED: encode/decode functions removed in v3 simplification)
 
 # Helper function to write profile safely
 write_profile_entry() {
-    local username="$1"
-    local name="$2"
-    local email="$3"
-    local gpg_key="${4:-}"
-    local auto_sign="${5:-false}"
-    
-    # Validate inputs
-    if ! validate_profile_input "$username" "$name" "$email" "$gpg_key"; then
-        return 1
-    fi
-    
-    # Encode values safely
-    local encoded_name=$(encode_profile_value "$name")
-    local encoded_email=$(encode_profile_value "$email")
-    local encoded_gpg_key=$(encode_profile_value "$gpg_key")
-    
-    if [[ -z "$encoded_name" || -z "$encoded_email" ]]; then
-        echo "❌ Failed to encode profile data"
-        return 1
-    fi
-    
-    # Create profile directory if it doesn't exist
-    local profile_dir=$(dirname "$GH_USER_PROFILES")
-    if [[ ! -d "$profile_dir" ]]; then
-        mkdir -p "$profile_dir" 2>/dev/null
-        if [[ $? -ne 0 ]]; then
-            echo "❌ Failed to create profile directory: $profile_dir"
-            return 1
-        fi
-    fi
-    
-    # Create/update the profile with atomic write
-    touch "$GH_USER_PROFILES" 2>/dev/null
-    if [[ $? -ne 0 ]]; then
-        echo "❌ Cannot create profile file: $GH_USER_PROFILES"
-        return 1
-    fi
-    
-    # Atomic update with proper temp file handling
-    # TEST: test_write_profile_entry_atomicity()
-    # - Kill process during write (temp file should be cleaned up)
-    # - Concurrent writes (multiple processes, should not corrupt)
-    # - Disk full during write (should fail gracefully, not corrupt)
-    # - Permission denied on directory (should fail with clear message)
-    # - Existing profile update (should replace, not duplicate)
-    # - New profile creation (should add to file)
-    # - Invalid filesystem move (different filesystems, should fail safely)
-    local temp_file="${GH_USER_PROFILES}.tmp.$$"
-    
-    # Set up cleanup trap for temp file
-    trap 'rm -f "$temp_file"' EXIT
-    
-    # Remove existing profile for this user and add new profile
-    if [[ -f "$GH_USER_PROFILES" ]]; then
-        grep -v "^$username:" "$GH_USER_PROFILES" > "$temp_file" 2>/dev/null || true
-    else
-        > "$temp_file"
-    fi
-    
-    # Add new profile (format: username:2:base64(name):base64(email):base64(gpg_key):auto_sign)
-    echo "$username:2:$encoded_name:$encoded_email:$encoded_gpg_key:$auto_sign" >> "$temp_file"
-    
-    # Atomic move (same filesystem required)
-    if mv "$temp_file" "$GH_USER_PROFILES" 2>/dev/null; then
-        trap - EXIT  # Clear trap on success
-        return 0
-    else
-        echo "❌ Failed to update profile file"
-        return 1
-    fi
+    # Wrapper to new plain-text v3 writer; keeps existing call-sites intact.
+    write_profile_entry_v3 "$@"
 }
 
 # Helper function to create a user profile with enhanced data capture
@@ -639,7 +517,7 @@ create_user_profile() {
     if write_profile_entry "$username" "$name" "$email" "$gpg_key" "$auto_sign"; then
         echo "✅ Created profile for $username: $name <$email>"
         if [[ -n "$gpg_key" ]]; then
-            echo "   � GPG key: $gpg_key (auto-sign: $auto_sign)"
+            echo "   🔑 GPG key: $gpg_key (auto-sign: $auto_sign)"
         fi
         return 0
     else
@@ -648,79 +526,7 @@ create_user_profile() {
     fi
 }
 
-# Helper function to migrate old profile format to new format
-# TEST: test_migrate_old_profile_format()
-# - Missing profile file (should return 0, no-op)
-# - New format file (should return 0, no changes)
-# - Old format v0 (username=name|email, should migrate to v1)
-# - Old format v2 with SSH/timestamps (should migrate to v2.1)
-# - Mixed format file (some old, some new, should migrate only old)
-# - Corrupted old format (should fail gracefully, keep backup)
-# - Permission denied during migration (should fail safely)
-# - Backup creation failure (should abort migration)
-# - Large file migration (test performance)
-# - Special characters in old format (should handle properly)
-migrate_old_profile_format() {
-    if [[ ! -f "$GH_USER_PROFILES" ]]; then
-        return 0
-    fi
-    
-    # Check if file contains old format (has = instead of :)
-    if grep -q "=" "$GH_USER_PROFILES" 2>/dev/null; then
-        echo "🔄 Migrating profiles to new format..."
-        local backup_file="${GH_USER_PROFILES}.backup.$(date +%s)"
-        
-        # Create backup
-        if ! cp "$GH_USER_PROFILES" "$backup_file" 2>/dev/null; then
-            echo "⚠️  Could not create profile backup"
-            return 1
-        fi
-        
-        # Create temporary file for new format
-        local temp_file="${GH_USER_PROFILES}.migrating"
-        > "$temp_file"
-        
-        # Migrate each line
-        local migration_failed=false
-        while IFS='=' read -r username profile_data; do
-            if [[ -n "$username" && -n "$profile_data" ]]; then
-                local name=$(echo "$profile_data" | cut -d'|' -f1)
-                local email=$(echo "$profile_data" | cut -d'|' -f2)
-                
-                if [[ -n "$name" && -n "$email" ]]; then
-                    # Encode safely
-                    local encoded_name=$(encode_profile_value "$name")
-                    local encoded_email=$(encode_profile_value "$email")
-                    
-                    if [[ -n "$encoded_name" && -n "$encoded_email" ]]; then
-                        echo "$username:1:$encoded_name:$encoded_email" >> "$temp_file"
-                    else
-                        echo "⚠️  Failed to migrate profile for $username"
-                        migration_failed=true
-                    fi
-                fi
-            fi
-        done < "$GH_USER_PROFILES"
-        
-        if [[ "$migration_failed" == "false" ]]; then
-            # Migration successful, replace original
-            if mv "$temp_file" "$GH_USER_PROFILES" 2>/dev/null; then
-                echo "✅ Profile migration completed (backup: $backup_file)"
-                return 0
-            else
-                echo "❌ Failed to replace profile file"
-                rm -f "$temp_file" 2>/dev/null
-                return 1
-            fi
-        else
-            echo "❌ Profile migration failed, keeping original format"
-            rm -f "$temp_file" 2>/dev/null
-            return 1
-        fi
-    fi
-    
-    return 0
-}
+# (DELETED: migrate_old_profile_format removed in v3 simplification)
 
 # Helper function to get user profile (returns enhanced git config for a GitHub username)
 get_user_profile() {
@@ -734,8 +540,7 @@ get_user_profile() {
         return 1
     fi
     
-    # Try migration if needed
-    migrate_old_profile_format
+    # V3-only profile reading (no migration)
     
     # Look for profile (username:version:...)
     local profile_line=$(grep "^$username:" "$GH_USER_PROFILES" 2>/dev/null | head -1)
@@ -744,18 +549,6 @@ get_user_profile() {
         local version=$(echo "$profile_line" | cut -d':' -f2)
         
         if [[ "$version" == "2" ]]; then
-            # TODO: Plan migration timeline for legacy format support
-            # Current backward compatibility logic supports 4 different profile formats
-            # Consider deprecation schedule: 6 months notice, then drop legacy support
-            # TEST: test_get_user_profile_backward_compatibility()
-            # - Version 0: username=name|email (should return structured data)
-            # - Version 1: username:1:base64(name):base64(email) (should return with defaults)
-            # - Version 2 old: username:2:name:email:gpg:ssh:auto:time (should ignore ssh/time)
-            # - Version 2 new: username:2:name:email:gpg:auto (should parse correctly)
-            # - Invalid version: username:99:... (should fail gracefully)
-            # - Corrupted profile line (should fail gracefully, not crash)
-            # - Empty profile file (should return 1)
-            # - Multiple profiles for same user (should use first)
             # Check if it's new format (5 fields) or old format (7+ fields)
             local field_count=$(echo "$profile_line" | tr ':' '\n' | wc -l)
             
@@ -820,6 +613,10 @@ get_user_profile() {
                     return 0
                 fi
             fi
+        else
+            # Treat as v3 (no explicit version)
+            parse_profile_line_v3 "$profile_line"
+            return $?
         fi
     fi
     
@@ -843,7 +640,6 @@ get_user_profile() {
 }
 
 # Helper function to validate profile completeness (simplified)
-# TODO: Standardize error handling strategy across all functions
 # Currently uses mix of echo statements and return codes - consider structured error format
 validate_profile_completeness() {
     local username="$1"
@@ -855,9 +651,9 @@ validate_profile_completeness() {
         return 1
     fi
     
-    local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-    local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
-    local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
+    local name=$(field "$profile" "name")
+    local email=$(field "$profile" "email")
+    local gpg_key=$(field "$profile" "gpg_key")
     
     # Check required fields
     if [[ -z "$name" ]]; then
@@ -873,7 +669,7 @@ validate_profile_completeness() {
             issues+=("authentication")
         else
             # Check if this specific user is authenticated
-            local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
+            local current_user=$(get_current_github_user)
             if [[ "$current_user" != "$username" ]]; then
                 issues+=("authentication")
             fi
@@ -904,15 +700,12 @@ display_simple_profile() {
     fi
     
     # Get basic info
-    local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-    local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
-    local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
+    local name=$(field "$profile" "name")
+    local email=$(field "$profile" "email")
+    local gpg_key=$(field "$profile" "gpg_key")
     
     # Find user ID and current status
-    local user_id=""
-    if [[ -f "$GH_USERS_CONFIG" ]]; then
-        user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
-    fi
+    local user_id=$(get_user_id "$username")
     local is_current=""
     [[ "$username" == "$current_user" ]] && is_current=" (current)"
     
@@ -936,8 +729,8 @@ display_simple_profile() {
     fi
     
     # Auth status (simplified)
-    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-        local auth_user=$(gh api user --jq '.login' 2>/dev/null)
+    if check_gh_auth; then
+        local auth_user=$(get_current_github_user)
         if [[ "$auth_user" == "$username" ]]; then
             echo "     Auth: Authenticated"
         else
@@ -949,15 +742,6 @@ display_simple_profile() {
 }
 
 # Helper function to extract and parse profile data
-# TEST: test_extract_profile_data()
-# - Empty username (should return 1)
-# - Non-existent user profile (should return 1, show error)
-# - Valid profile extraction (should return structured data)
-# - Current user detection (should set is_current correctly)
-# - Missing user ID (should handle gracefully)
-# - Profile parsing with various formats (via get_user_profile)
-# - Special characters in username (should handle safely)
-# - Very long usernames (should not break parsing)
 extract_profile_data() {
     local username="$1"
     local current_user="${2:-}"
@@ -968,16 +752,13 @@ extract_profile_data() {
         return 1
     fi
     
-    local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-    local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
-    local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
-    local auto_sign=$(echo "$profile" | grep "^auto_sign:" | cut -d':' -f2-)
+    local name=$(field "$profile" "name")
+    local email=$(field "$profile" "email")
+    local gpg_key=$(field "$profile" "gpg_key")
+    local auto_sign=$(field "$profile" "auto_sign")
     
     # Find user ID
-    local user_id=""
-    if [[ -f "$GH_USERS_CONFIG" ]]; then
-        user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
-    fi
+    local user_id=$(get_user_id "$username")
     
     # Check if current user
     local is_current=""
@@ -997,9 +778,9 @@ extract_profile_data() {
 format_profile_header() {
     local data="$1"
     
-    local username=$(echo "$data" | grep "^username:" | cut -d':' -f2-)
-    local user_id=$(echo "$data" | grep "^user_id:" | cut -d':' -f2-)
-    local is_current=$(echo "$data" | grep "^is_current:" | cut -d':' -f2-)
+    local username=$(field "$data" "username")
+    local user_id=$(field "$data" "user_id")
+    local is_current=$(field "$data" "is_current")
     
     # Check profile completeness
     local completeness_icon="✅"
@@ -1026,10 +807,10 @@ format_profile_header() {
 format_profile_details() {
     local data="$1"
     
-    local name=$(echo "$data" | grep "^name:" | cut -d':' -f2-)
-    local email=$(echo "$data" | grep "^email:" | cut -d':' -f2-)
-    local gpg_key=$(echo "$data" | grep "^gpg_key:" | cut -d':' -f2-)
-    local auto_sign=$(echo "$data" | grep "^auto_sign:" | cut -d':' -f2-)
+    local name=$(field "$data" "name")
+    local email=$(field "$data" "email")
+    local gpg_key=$(field "$data" "gpg_key")
+    local auto_sign=$(field "$data" "auto_sign")
     
     echo "     Name: $name"
     echo "     Email: $email"
@@ -1053,7 +834,7 @@ format_auth_status() {
     
     if command -v gh >/dev/null 2>&1; then
         if gh auth status --hostname github.com >/dev/null 2>&1; then
-            local authenticated_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
+            local authenticated_user=$(get_current_github_user)
             if [[ "$authenticated_user" == "$username" ]]; then
                 echo "     Auth: ✅ Authenticated"
             else
@@ -1088,17 +869,9 @@ display_rich_profile() {
 }
 
 # Helper function to resolve "current" username
-# TEST: test_resolve_current_username()
-# - gh command not found (should return 1, show error)
-# - gh not authenticated (should return 1, show error)  
-# - gh api fails (should return 1, show error)
-# - gh api returns empty (should return 1, show error)
-# - gh api returns valid username (should return 0, echo username)
-# - gh auth status passes but api fails (should return 1)
-# - Mock gh commands for isolated testing
 resolve_current_username() {
-    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-        local username=$(gh api user --jq '.login' 2>/dev/null || echo "")
+    if check_gh_auth; then
+        local username=$(get_current_github_user)
         if [[ -z "$username" ]]; then
             echo "❌ Could not detect current GitHub user"
             return 1
@@ -1117,10 +890,6 @@ check_user_existence() {
     
     if [[ -f "$GH_USERS_CONFIG" ]] && grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
         echo "⚠️  User $username already exists"
-        read -p "Do you want to recreate the profile with auto-detection? (y/n): " recreate
-        if [[ "$recreate" != "y" && "$recreate" != "Y" ]]; then
-            return 1  # Skip adding
-        fi
         return 0  # Proceed with adding/updating
     else
         # Add to user list
@@ -1132,116 +901,28 @@ check_user_existence() {
 
 # Helper function to run auto-detection workflow
 run_autodetection_workflow() {
-    local username="$1"
-    
-    echo "🔍 Detecting current git configuration..."
-    local current_config=$(detect_git_config "auto")
-    if [[ $? -ne 0 ]]; then
-        return 1  # Auto-detection failed
-    fi
-    
-    local detected_name=$(echo "$current_config" | grep "^name:" | cut -d':' -f2-)
-    local detected_email=$(echo "$current_config" | grep "^email:" | cut -d':' -f2-)
-    local detected_gpg_key=$(detect_gpg_key "auto")
-    local detected_auto_sign=$(detect_auto_sign "auto")
-    
-    echo ""
-    echo "📋 Found git config:"
-    echo "   Name: $detected_name"
-    echo "   Email: $detected_email"
-    if [[ -n "$detected_gpg_key" ]]; then
-        echo "   GPG Key: $detected_gpg_key"
-        echo "   Auto-sign: $detected_auto_sign"
-    fi
-    echo ""
-    
-    read -p "Use these values for $username profile? (y/n/edit): " choice
-    case "$choice" in
-        y|Y|yes)
-            create_user_profile "$username" "$detected_name" "$detected_email" "false" "$detected_gpg_key" "$detected_auto_sign"
-            ;;
-        e|E|edit)
-            # Create with detected values then show help for updating
-            create_user_profile "$username" "$detected_name" "$detected_email" "false" "$detected_gpg_key" "$detected_auto_sign"
-            echo ""
-            echo "💡 Profile created! Use 'ghs update $username <field> \"<value>\"' to modify fields"
-            ;;
-        *)
-            run_manual_entry_workflow "$username"
-            ;;
-    esac
-    
-    return 0
+    # Deprecated interactive workflow removed in v3 cleanup
+    echo "⚠️  run_autodetection_workflow is deprecated. Use flag-based 'ghs add-user' instead." 
+    return 1
 }
 
 # Helper function to run manual entry workflow
 run_manual_entry_workflow() {
-    local username="$1"
-    
-    echo "📝 Manual profile creation:"
-    read -p "Enter name: " manual_name
-    read -p "Enter email: " manual_email
-    read -p "Enter GPG key (optional): " manual_gpg_key
-    read -p "Enable auto-sign commits? (y/n): " manual_auto_sign
-    
-    if [[ -z "$manual_name" || -z "$manual_email" ]]; then
-        echo "❌ Name and email are required"
-        return 1
-    fi
-    
-    case "$manual_auto_sign" in
-        y|Y|yes)
-            manual_auto_sign="true"
-            ;;
-        *)
-            manual_auto_sign="false"
-            ;;
-    esac
-    
-    create_user_profile "$username" "$manual_name" "$manual_email" "false" "$manual_gpg_key" "$manual_auto_sign"
+    # Deprecated manual entry workflow removed – non-interactive flags required
+    echo "⚠️  run_manual_entry_workflow is deprecated. Provide --name and --email flags instead."
+    return 1
 }
 
 # Helper function to update profile field
-# TEST: test_update_profile_field()
-# - Invalid field name (should return 1, show error)
-# - Empty value (should update to empty, return 0)
-# - Update by user number (should resolve and update)
-# - Update by username (should update directly)
-# - Update by "current" (should resolve current user and update)
-# - Non-existent user (should return 1, show error)
-# - User number out of range (should return 1)
-# - "current" when not authenticated (should return 1)
-# - Special characters in value (should handle safely)
-# - Very long value (should handle or limit appropriately)
-# - Profile write failure (should return 1, show error)
 update_profile_field() {
     local user_input="$1"
     local field="$2" 
     local value="$3"
     
     # Resolve user input to username (handle number, username, or "current")
-    local username=""
-    if [[ "$user_input" == "current" ]]; then
-        # Get current GitHub user
-        if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-            username=$(gh api user --jq '.login' 2>/dev/null || echo "")
-            if [[ -z "$username" ]]; then
-                echo "❌ Could not detect current GitHub user"
-                return 1
-            fi
-        else
-            echo "❌ GitHub CLI not authenticated"
-            return 1
-        fi
-    elif [[ "$user_input" =~ ^[0-9]+$ ]]; then
-        # User number
-        username=$(get_user_by_id "$user_input")
-        if [[ $? -ne 0 ]]; then
-            return 1
-        fi
-    else
-        # Username directly
-        username="$user_input"
+    local username=$(resolve_user_by_input "$user_input")
+    if [[ $? -ne 0 ]]; then
+        return 1
     fi
     
     # Get current profile
@@ -1252,7 +933,6 @@ update_profile_field() {
     fi
     
     # Extract current values
-    # TODO: Consider centralizing profile parsing to reduce data structure coupling
     # Current string parsing is embedded throughout codebase - works well but tightly coupled
     local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
     local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
@@ -1276,6 +956,38 @@ update_profile_field() {
     fi
 }
 
+# Helper function to show help (DRY - single source of truth)
+show_help() {
+    echo "🎯 GitHub Project Switcher (ghs)"
+    echo ""
+    echo "Global GitHub account switching with numbered users and project memory."
+    echo ""
+    echo "INSTALLATION:"
+    echo "  ghs install                Install to shell profile (auto-detects zsh/bash)"
+    echo "  ghs uninstall              Remove from shell profile"
+    echo ""
+    echo "SETUP:"
+    echo "  ghs add-user <username>    Add user with profile fields"
+    echo "  ghs add-user current       Add currently authenticated GitHub user"
+    echo "  ghs add-user <user> --name \"Name\" --email \"email@domain\" --gpg <key> --auto-sign true --force"
+    echo ""
+    echo "DAILY WORKFLOW:"
+    echo "  ghs                        Show smart dashboard"
+    echo "  ghs switch <number>        Switch to user by number"
+    echo "  ghs assign <number>        Assign user as project default"
+    echo ""
+    echo "USER MANAGEMENT:"
+    echo "  ghs users                  Show numbered list of users"
+    echo "  ghs remove-user <user>     Remove user by name or number"
+    echo "  ghs profiles               Show user profiles (add --verbose for rich view)"
+    echo "  ghs update <user> <field> \"<value>\"  Update profile field (name, email, gpg)"
+    echo "  ghs validate [user]        Run profile validation check (all users or specific)"
+    echo ""
+    echo "PROJECT & STATUS:"
+    echo "  ghs status                 Show detailed current status"
+    echo "  ghs list                   List all configured projects"
+}
+
 # Helper function to run profile validation check for all users
 run_profile_health_check() {
     echo "🔍 Profile Validation"
@@ -1291,9 +1003,7 @@ run_profile_health_check() {
     while IFS= read -r username; do
         if [[ -n "$username" ]]; then
             local user_id=""
-            if [[ -f "$GH_USERS_CONFIG" ]]; then
-                user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
-            fi
+            user_id=$(get_user_id "$username")
             
             echo -n "Checking $username"
             if [[ -n "$user_id" ]]; then
@@ -1406,23 +1116,14 @@ apply_user_profile() {
 }
 
 # Helper function to apply git configuration with validation
-# TEST: test_apply_git_config()
-# - Invalid name/email (should return 1)
-# - Invalid scope parameter (should return 1)
-# - Not in git repo with local scope (should return 1)
-# - Git config set fails (mock git config to fail, should return 1)
-# - Git config verification fails (should return 1)
-# - Successful global config (should return 0, verify settings)
-# - Successful local config (should return 0, verify settings)
-# - Permission denied git config (should return 1)
-# - Git command not available (should return 1)
 apply_git_config() {
     local name="$1"
     local email="$2"
     local scope="${3:-local}"  # 'local' or 'global'
     
-    # Validate inputs
-    if ! validate_profile_input "temp" "$name" "$email" ""; then
+    # Minimal validation (colon safety & basic email check)
+    if ! validate_profile_field name "$name" || ! validate_profile_field email "$email"; then
+        echo "❌ Invalid name or email"
         return 1
     fi
     
@@ -1491,14 +1192,14 @@ apply_git_config() {
 # Helper function to perform first-time setup
 first_time_setup() {
     # Check if GitHub CLI is available and authenticated
-    if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+    if ! check_gh_auth; then
         echo "⚠️  GitHub CLI not authenticated"
         echo "   Run 'gh auth login' to get started, then try again"
         return 1
     fi
     
     # Get current GitHub user
-    local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
+    local current_user=$(get_current_github_user)
     if [[ -z "$current_user" ]]; then
         echo "❌ Could not detect current GitHub user"
         return 1
@@ -1529,12 +1230,6 @@ first_time_setup() {
 
 # Helper function to remove a user from the global list
 #
-# LIBRARY TRANSFORMATION NOTES:
-# - Would become: gh_switcher_remove_user() with return codes instead of direct output
-# - Cleanup operations would be separate functions: gh_switcher_cleanup_projects()
-# - Would support dry-run mode to show what would be removed
-# - Would handle namespace isolation automatically 
-# - Would provide detailed removal report (what projects were affected)
 remove_user() {
     local input="$1"
     if [[ -z "$input" ]]; then
@@ -1556,13 +1251,10 @@ remove_user() {
     else
         username="$input"
         # Find the user ID for display purposes
-        if [[ -f "$GH_USERS_CONFIG" ]]; then
-            user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1)
-        fi
+        user_id=$(get_user_id "$username")
     fi
     
     # Check if user exists in our list
-    # LIBRARY NOTE: Would need to ensure config file exists and handle gracefully
     if [[ ! -f "$GH_USERS_CONFIG" ]] || ! grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
         echo "❌ User $username not found in user list"
         echo "   Use 'ghs users' to see available users"
@@ -1570,15 +1262,14 @@ remove_user() {
     fi
     
     # Check if user is currently active (warn but don't block)
-    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-        local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
+    if check_gh_auth; then
+        local current_user=$(get_current_github_user)
         if [[ "$username" == "$current_user" ]]; then
             echo "⚠️  Warning: You're removing the currently active GitHub user"
         fi
     fi
     
     # Remove user from list
-    # LIBRARY NOTE: Would need atomic write operation with proper error handling
     if [[ -f "$GH_USERS_CONFIG" ]]; then
         grep -v "^$username$" "$GH_USERS_CONFIG" > "${GH_USERS_CONFIG}.tmp" 2>/dev/null || true
         mv "${GH_USERS_CONFIG}.tmp" "$GH_USERS_CONFIG"
@@ -1600,94 +1291,270 @@ remove_user() {
     fi
     
     # Show updated list
-    # LIBRARY NOTE: This UI coupling would be removed - caller decides what to show
     echo ""
     list_users
 }
 
+# Command functions for cleaner dispatcher
+
+cmd_profiles() {
+    local verbose_flag="$1"
+    
+    if [[ ! -f "$GH_USER_PROFILES" || ! -s "$GH_USER_PROFILES" ]]; then
+        echo "📋 No user profiles configured yet"
+        echo "   Profiles are created automatically when you add/switch users"
+        return 0
+    fi
+    
+    # Check for verbose flag (accepts old --detailed for backward compatibility)
+    local use_verbose=false
+    if [[ "$verbose_flag" == "--verbose" || "$verbose_flag" == "--detailed" ]]; then
+        use_verbose=true
+    fi
+    
+    echo "📋 User Profiles:"
+    echo ""
+    
+    # Get current user for highlighting
+    local current_user=""
+    if check_gh_auth; then
+        current_user=$(get_current_github_user)
+    fi
+    
+    # Display each user
+    if [[ -f "$GH_USERS_CONFIG" ]]; then
+        while IFS= read -r username; do
+            if [[ -n "$username" ]]; then
+                if [[ "$use_verbose" == "true" ]]; then
+                    display_rich_profile "$username" "$current_user"
+                else
+                    display_simple_profile "$username" "$current_user"
+                fi
+                echo ""
+            fi
+        done < "$GH_USERS_CONFIG"
+    fi
+}
+
+cmd_add_user() {
+    shift # Remove 'add-user' from args
+    local username="$1"
+    
+    if [[ -z "$username" ]]; then
+        echo "❌ Usage: ghs add-user <username> [--name \"Full Name\"] [--email \"email@domain\"] [--gpg <key>] [--auto-sign true|false] [--force]"
+        return 1
+    fi
+
+    # Resolve 'current' shortcut
+    if [[ "$username" == "current" ]]; then
+        username=$(resolve_current_username) || return 1
+        echo "💡 Detected current GitHub user: $username"
+    fi
+
+    # Shift past username
+    shift
+    local provided_name="" provided_email="" provided_gpg="" provided_auto_sign="" force=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name)
+                provided_name="$2"; shift 2;;
+            --email)
+                provided_email="$2"; shift 2;;
+            --gpg)
+                provided_gpg="$2"; shift 2;;
+            --auto-sign)
+                provided_auto_sign="$2"; shift 2;;
+            --force)
+                force=true; shift;;
+            *) echo "⚠️  Unknown option: $1"; return 1;;
+        esac
+    done
+
+    # Abort if exists and no --force
+    if [[ -f "$GH_USERS_CONFIG" ]] && grep -q "^$username$" "$GH_USERS_CONFIG" && [[ "$force" == false ]]; then
+        echo "⚠️  User $username already exists. Use --force to overwrite."
+        return 1
+    fi
+
+    # Auto-detect git config for missing fields
+    if [[ -z "$provided_name" || -z "$provided_email" ]]; then
+        if auto_cfg=$(detect_git_config "auto"); then
+            [[ -z "$provided_name" ]] && provided_name=$(field "$auto_cfg" "name")
+            [[ -z "$provided_email" ]] && provided_email=$(field "$auto_cfg" "email")
+        fi
+    fi
+
+    # Defaults
+    [[ -z "$provided_name" ]] && provided_name="$username"
+    [[ -z "$provided_email" ]] && provided_email="${username}@users.noreply.github.com"
+
+    # Write profile (V3)
+    if write_profile_entry_v3 "$username" "$provided_name" "$provided_email" "$provided_gpg" "$provided_auto_sign"; then
+        mkdir -p "$(dirname "$GH_USERS_CONFIG")" 2>/dev/null || true
+        touch "$GH_USERS_CONFIG"
+        if ! grep -q "^$username$" "$GH_USERS_CONFIG"; then
+            echo "$username" >> "$GH_USERS_CONFIG"
+        fi
+        echo "✅ Added/updated profile for $username"
+    else
+        echo "❌ Failed to add profile for $username"
+        return 1
+    fi
+}
+
+cmd_switch() {
+    local user_id="$1"
+    
+    if [[ -z "$user_id" ]]; then
+        echo "❌ Usage: ghs switch <user_number>"
+        echo "   Use 'ghs users' to see available users"
+        return 1
+    fi
+    
+    local username=$(get_user_by_id "$user_id")
+    if [[ $? -eq 0 ]]; then
+        # Switch to the user first
+        if gh auth switch --user "$username" 2>/dev/null; then
+            # Clear cached user since we just switched
+            clear_github_user_cache
+            echo "✅ Switched to $username (#$user_id)"
+            
+            # Check if user has a profile
+            local profile=$(get_user_profile "$username")
+            if [[ $? -eq 0 ]]; then
+                # Profile exists - apply it automatically
+                if apply_user_profile "$username" "local"; then
+                    local name=$(field "$profile" "name")
+                    local email=$(field "$profile" "email")
+                    echo "✅ Applied git config: $name <$email>"
+                else
+                    echo "⚠️  Could not apply git config profile (continuing with GitHub switch)"
+                fi
+            else
+                # No profile exists - create one from current config
+                echo "💡 Creating profile for $username from current git config"
+                if create_user_profile "$username" "" "" "true"; then
+                    # Now apply the newly created profile
+                    if apply_user_profile "$username" "local"; then
+                        echo "✅ Applied newly created git config profile"
+                    else
+                        echo "⚠️  Created profile but could not apply git config"
+                    fi
+                else
+                    echo "⚠️  Could not create git config profile (continuing with GitHub switch)"
+                fi
+            fi
+        else
+            echo "❌ Failed to switch to $username"
+            echo "   Account may not be authenticated. Run: gh auth login"
+            return 1
+        fi
+    fi
+}
+
+cmd_assign() {
+    local input="$1"
+    local project="$2"
+    
+    if [[ -z "$input" ]]; then
+        echo "❌ Usage: ghs assign <username_or_number>"
+        echo "   Use 'ghs users' to see available users"
+        return 1
+    fi
+    
+    local username=""
+    # Check if input is a number (user ID) or username  
+    if [[ "$input" =~ ^[0-9]+$ ]]; then
+        username=$(get_user_by_id "$input")
+        if [[ $? -ne 0 ]]; then
+            return 1
+        fi
+        echo "💡 Using user #$input: $username"
+    else
+        username="$input"
+        # Validate username format (basic security)
+        if [[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "❌ Invalid username format"
+            return 1
+        fi
+    fi
+    
+    # Remove any existing entry for this project and add new one
+    touch "$GH_PROJECT_CONFIG"
+    grep -v "^$project=" "$GH_PROJECT_CONFIG" > "${GH_PROJECT_CONFIG}.tmp" 2>/dev/null || true
+    echo "$project=$username" >> "${GH_PROJECT_CONFIG}.tmp"
+    mv "${GH_PROJECT_CONFIG}.tmp" "$GH_PROJECT_CONFIG"
+    
+    echo "✅ Assigned $username as default account for $project"
+}
+
+cmd_status() {
+    local project="$1"
+    
+    echo "📍 Current project: $project"
+    if check_gh_auth; then
+        local current_user=$(get_current_github_user)
+        if [[ -z "$current_user" ]]; then
+            current_user="unknown"
+        fi
+        
+        # Try to find current user ID
+        local current_user_id=$(get_user_id "$current_user")
+        
+        if [[ -n "$current_user_id" ]]; then
+            echo "👤 Current GitHub user: $current_user (#$current_user_id)"
+        else
+            echo "👤 Current GitHub user: $current_user"
+        fi
+        
+        local project_user=""
+        if [[ -f "$GH_PROJECT_CONFIG" ]]; then
+            project_user=$(grep "^$project=" "$GH_PROJECT_CONFIG" 2>/dev/null | cut -d'=' -f2)
+        fi
+        
+        if [[ -n "$project_user" ]]; then
+            # Try to find project user ID
+            local project_user_id=$(get_user_id "$project_user")
+            
+            if [[ "$current_user" == "$project_user" ]]; then
+                echo "✅ Correct account for this project!"
+            else
+                local project_user_display="$project_user"
+                if [[ -n "$project_user_id" ]]; then
+                    project_user_display="$project_user (#$project_user_id)"
+                fi
+                echo "⚠️  This project should use: $project_user_display"
+                if [[ -n "$project_user_id" ]]; then
+                    echo "   Run 'ghs switch $project_user_id' to switch"
+                else
+                    echo "   Run 'ghs switch <number>' to switch"
+                fi
+            fi
+        else
+            echo "💡 No account configured for this project"
+            echo "   Run 'ghs assign <username_or_number>' to configure"
+        fi
+    else
+        echo "❌ GitHub CLI not authenticated or not installed"
+        echo "   Run 'gh auth login' to get started"
+    fi
+}
+
 # Simple GitHub project switcher function
-#
-# LIBRARY TRANSFORMATION NOTES:
-# This main function would be split into:
-# 1. gh_switcher_main() - CLI interface (current behavior)
-# 2. Core API functions - for programmatic use
-# 3. UI functions - for customizable presentation
-#
-# Library structure would be:
-# - gh_switcher_init(namespace, config_dir)
-# - gh_switcher_add_user(username) -> return code
-# - gh_switcher_get_users() -> structured data
-# - gh_switcher_set_project(project, user) -> return code
-# - gh_switcher_get_project_user(project) -> username
-# - gh_switcher_switch_user(username) -> return code
-# - gh_switcher_get_status() -> structured data
-#
-# Current project detection would be configurable:
-# - Default: $(basename "$PWD") 
-# - Override: GH_SWITCHER_PROJECT_NAME environment variable
-# - API: gh_switcher_set_project_detector(function_name)
 ghs() {
     local cmd="${1:-dashboard}"
-    local project="$(basename "$PWD")"  # LIBRARY NOTE: Would be configurable
+    local project="$(basename "$PWD")"
     
     case "$cmd" in
         "remove-user"|"rm-user")
             remove_user "$2"
             ;;
-            
         "users"|"list-users")
             list_users
             ;;
-            
         "profiles")
-            # TEST: test_ghs_profiles_command()
-            # - No profiles file (should show helpful message, return 0)
-            # - Empty profiles file (should show helpful message, return 0)
-            # - No --detailed flag (should call display_simple_profile)
-            # - --detailed flag (should call display_rich_profile)
-            # - Invalid flag (should default to simple, not crash)
-            # - Large number of profiles (should be performant)
-            # - Mixed profile formats (should handle gracefully via migration)
-            # - Current user highlighting (should work with/without auth)
-            if [[ ! -f "$GH_USER_PROFILES" || ! -s "$GH_USER_PROFILES" ]]; then
-                echo "📋 No user profiles configured yet"
-                echo "   Profiles are created automatically when you add/switch users"
-                return 0
-            fi
-            
-            # Check for detailed flag
-            local use_detailed=false
-            if [[ "$2" == "--detailed" ]]; then
-                use_detailed=true
-            fi
-            
-            echo "📋 User Profiles:"
-            echo ""
-            
-            # Get current user for highlighting
-            local current_user=""
-            if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-                current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
-            fi
-            
-            # Try migration first
-            migrate_old_profile_format
-            
-            # Display each user
-            if [[ -f "$GH_USERS_CONFIG" ]]; then
-                while IFS= read -r username; do
-                    if [[ -n "$username" ]]; then
-                        if [[ "$use_detailed" == "true" ]]; then
-                            display_rich_profile "$username" "$current_user"
-                        else
-                            display_simple_profile "$username" "$current_user"
-                        fi
-                        echo ""
-                    fi
-                done < "$GH_USERS_CONFIG"
-            fi
+            cmd_profiles "$2"
             ;;
-            
         "edit"|"update-profile")
             echo "💡 The edit command has been replaced with update for better CLI experience"
             echo ""
@@ -1701,18 +1568,9 @@ ghs() {
             echo "  ghs update current email \"john@newcompany.com\""
             echo "  ghs update johndoe gpg \"ABC123DEF\""
             echo ""
-            echo "Use 'ghs profiles --detailed' to see current values"
+            echo "Use 'ghs profiles --verbose' to see current values"
             ;;
-            
         "update")
-            # TEST: test_ghs_update_command()
-            # - Missing arguments (should show usage, return 1)
-            # - Invalid field name (should return 1, show error)
-            # - Valid field update (should call update_profile_field)
-            # - Pattern consistency: same user references as switch/assign
-            # - Field validation: only allow name, email, gpg
-            # - Value with spaces (should handle quoted values)
-            # - Empty value (should allow clearing fields)
             local user_input="$2"
             local field="$3"
             local value="$4"
@@ -1731,19 +1589,12 @@ ghs() {
             
             update_profile_field "$user_input" "$field" "$value"
             ;;
-            
         "validate")
             if [[ -n "$2" ]]; then
                 # Validate specific user
-                local input="$2"
-                local username=""
-                if [[ "$input" =~ ^[0-9]+$ ]]; then
-                    username=$(get_user_by_id "$input")
-                    if [[ $? -ne 0 ]]; then
-                        return 1
-                    fi
-                else
-                    username="$input"
+                local username=$(resolve_user_by_input "$2")
+                if [[ $? -ne 0 ]]; then
+                    return 1
                 fi
                 
                 echo "🔍 Validating profile: $username"
@@ -1754,160 +1605,22 @@ ghs() {
                 run_profile_health_check
             fi
             ;;
-            
         "add-user")
-            # TEST: test_ghs_add_user_command()
-            # - No username provided (should show usage, return 1)
-            # - Invalid username format (should return 1, show error)
-            # - "current" keyword with no auth (should return 1)
-            # - "current" keyword with auth (should detect and add user)
-            # - Existing user (should prompt for recreation)
-            # - New valid user (should add and create profile)
-            # - Auto-detection success (should use detected values)
-            # - Auto-detection failure (should fall back to manual)
-            # - Manual entry with invalid data (should return 1)
-            # - Manual entry with valid data (should create profile)
-            local username="$2"
-            if [[ -z "$username" ]]; then
-                echo "❌ Usage: ghs add-user <username>"
-                echo "   Use 'current' to add the currently authenticated GitHub user"
-                return 1
-            fi
-            
-            # Handle "current" special case
-            if [[ "$username" == "current" ]]; then
-                username=$(resolve_current_username)
-                if [[ $? -ne 0 ]]; then
-                    return 1
-                fi
-                echo "💡 Adding current GitHub user: $username"
-            fi
-            
-            # Check if user already exists and handle
-            if ! check_user_existence "$username"; then
-                return 0
-            fi
-            
-            # Try auto-detection workflow, fallback to manual if needed
-            if ! run_autodetection_workflow "$username"; then
-                echo "⚠️  Could not detect git configuration"
-                if ! run_manual_entry_workflow "$username"; then
-                    return 1
-                fi
-            fi
-            
-            echo ""
-            list_users
+            cmd_add_user "$@"
             ;;
-            
         "switch")
-            # TEST: test_ghs_switch_command()
-            # - No user ID provided (should show usage, return 1)
-            # - Invalid user ID (should return 1)
-            # - Valid user ID (should switch GitHub auth and apply profile)
-            # - GitHub switch failure (should return 1, show error)
-            # - Profile application success (should show git config applied)
-            # - Profile application failure (should warn but continue)
-            # - Auto-profile creation when missing (should create and apply)
-            # - Integration test: full switch workflow
-            local user_id="$2"
-            if [[ -z "$user_id" ]]; then
-                echo "❌ Usage: ghs switch <user_number>"
-                echo "   Use 'ghs users' to see available users"
-                return 1
-            fi
-            
-            local username=$(get_user_by_id "$user_id")
-            if [[ $? -eq 0 ]]; then
-                # Switch to the user first
-                if gh auth switch --user "$username" 2>/dev/null; then
-                    echo "✅ Switched to $username (#$user_id)"
-                    
-                    # Check if user has a profile
-                    local profile=$(get_user_profile "$username")
-                    if [[ $? -eq 0 ]]; then
-                        # Profile exists - apply it automatically
-                        if apply_user_profile "$username" "local"; then
-                            local name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-                            local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
-                            echo "✅ Applied git config: $name <$email>"
-                        else
-                            echo "⚠️  Could not apply git config profile (continuing with GitHub switch)"
-                        fi
-                    else
-                        # No profile exists - create one from current config
-                        echo "💡 Creating profile for $username from current git config"
-                        if create_user_profile "$username" "" "" "true"; then
-                            # Now apply the newly created profile
-                            if apply_user_profile "$username" "local"; then
-                                echo "✅ Applied newly created git config profile"
-                            else
-                                echo "⚠️  Created profile but could not apply git config"
-                            fi
-                        else
-                            echo "⚠️  Could not create git config profile (continuing with GitHub switch)"
-                        fi
-                    fi
-                else
-                    echo "❌ Failed to switch to $username"
-                    echo "   Account may not be authenticated. Run: gh auth login"
-                    return 1
-                fi
-            fi
+            cmd_switch "$2"
             ;;
-            
         "assign")
-            local input="$2"
-            if [[ -z "$input" ]]; then
-                echo "❌ Usage: ghs assign <username_or_number>"
-                echo "   Use 'ghs users' to see available users"
-                return 1
-            fi
-            
-            local username=""
-            # Check if input is a number (user ID) or username
-            if [[ "$input" =~ ^[0-9]+$ ]]; then
-                username=$(get_user_by_id "$input")
-                if [[ $? -ne 0 ]]; then
-                    return 1
-                fi
-                echo "💡 Using user #$input: $username"
-            else
-                username="$input"
-                # Validate username format (basic security)
-                if [[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-                    echo "❌ Invalid username format"
-                    return 1
-                fi
-            fi
-            
-                # Remove any existing entry for this project and add new one
-    # TEST: test_project_assignment_atomicity()
-    # - Concurrent project assignments (should not corrupt file)
-    # - Permission denied (should fail gracefully)
-    # - Disk full during write (should fail safely)  
-    # - Process killed during operation (should cleanup temp file)
-    # - Invalid project names (should validate/sanitize)
-    # - Very long project names (should handle or limit)
-    # - Special characters in project names (should escape properly)
-    touch "$GH_PROJECT_CONFIG"
-    grep -v "^$project=" "$GH_PROJECT_CONFIG" > "${GH_PROJECT_CONFIG}.tmp" 2>/dev/null || true
-    echo "$project=$username" >> "${GH_PROJECT_CONFIG}.tmp"
-    mv "${GH_PROJECT_CONFIG}.tmp" "$GH_PROJECT_CONFIG"
-            
-            echo "✅ Assigned $username as default account for $project"
+            cmd_assign "$2" "$project"
             ;;
-            
         "list")
             if [[ -f "$GH_PROJECT_CONFIG" && -s "$GH_PROJECT_CONFIG" ]]; then
                 echo "📋 Configured project accounts:"
                 while IFS='=' read -r proj user; do
                     if [[ -n "$proj" && -n "$user" ]]; then
                         # Try to find user ID if it exists in users list
-                        local user_id=""
-                        if [[ -f "$GH_USERS_CONFIG" ]]; then
-                            user_id=$(grep -n "^$user$" "$GH_USERS_CONFIG" | cut -d: -f1)
-                        fi
+                        local user_id=$(get_user_id "$user")
                         
                         local user_display="$user"
                         if [[ -n "$user_id" ]]; then
@@ -1926,69 +1639,13 @@ ghs() {
                 echo "   Use 'ghs assign <username_or_number>' to configure current project"
             fi
             ;;
-            
         "status")
-            echo "📍 Current project: $project"
-            if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-                local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "unknown")
-                
-                # Try to find current user ID
-                local current_user_id=""
-                if [[ -f "$GH_USERS_CONFIG" ]]; then
-                    current_user_id=$(grep -n "^$current_user$" "$GH_USERS_CONFIG" | cut -d: -f1)
-                fi
-                
-                if [[ -n "$current_user_id" ]]; then
-                    echo "� Current GitHub user: $current_user (#$current_user_id)"
-                else
-                    echo "� Current GitHub user: $current_user"
-                fi
-                
-                local project_user=""
-                if [[ -f "$GH_PROJECT_CONFIG" ]]; then
-                    project_user=$(grep "^$project=" "$GH_PROJECT_CONFIG" 2>/dev/null | cut -d'=' -f2)
-                fi
-                
-                if [[ -n "$project_user" ]]; then
-                    # Try to find project user ID
-                    local project_user_id=""
-                    if [[ -f "$GH_USERS_CONFIG" ]]; then
-                        project_user_id=$(grep -n "^$project_user$" "$GH_USERS_CONFIG" | cut -d: -f1)
-                    fi
-                    
-                    if [[ "$current_user" == "$project_user" ]]; then
-                        echo "✅ Correct account for this project!"
-                    else
-                        local project_user_display="$project_user"
-                        if [[ -n "$project_user_id" ]]; then
-                            project_user_display="$project_user (#$project_user_id)"
-                        fi
-                        echo "⚠️  This project should use: $project_user_display"
-                        if [[ -n "$project_user_id" ]]; then
-                            echo "   Run 'ghs switch $project_user_id' to switch"
-                        else
-                            echo "   Run 'ghs switch <number>' to switch"
-                        fi
-                    fi
-                else
-                    echo "💡 No account configured for this project"
-                    echo "   Run 'ghs assign <username_or_number>' to configure"
-                fi
-            else
-                echo "❌ GitHub CLI not authenticated or not installed"
-                echo "   Run 'gh auth login' to get started"
-            fi
+            cmd_status "$project"
             ;;
-            
         "install")
             # Install the switcher to shell profile
-            local shell_profile=""
-            # Detect shell more reliably
-            if [[ "$SHELL" == *"zsh"* ]] || [[ -n "$ZSH_VERSION" ]]; then
-                shell_profile="$HOME/.zshrc"
-            elif [[ "$SHELL" == *"bash"* ]] || [[ -n "$BASH_VERSION" ]]; then
-                shell_profile="$HOME/.bashrc"
-            else
+            local shell_profile=$(detect_shell_profile)
+            if [[ $? -ne 0 ]]; then
                 echo "❌ Unsupported shell ($SHELL). Please manually add to your shell profile:"
                 echo "   echo 'source $(realpath "$0")' >> ~/.zshrc"
                 return 1
@@ -2009,16 +1666,10 @@ ghs() {
             echo "   Restart your terminal or run: source $shell_profile"
             echo "   Then use 'ghs' anywhere!"
             ;;
-            
         "uninstall")
             # Remove from shell profile
-            local shell_profile=""
-            # Detect shell more reliably
-            if [[ "$SHELL" == *"zsh"* ]] || [[ -n "$ZSH_VERSION" ]]; then
-                shell_profile="$HOME/.zshrc"
-            elif [[ "$SHELL" == *"bash"* ]] || [[ -n "$BASH_VERSION" ]]; then
-                shell_profile="$HOME/.bashrc"
-            else
+            local shell_profile=$(detect_shell_profile)
+            if [[ $? -ne 0 ]]; then
                 echo "❌ Unsupported shell ($SHELL). Please manually remove from your shell profile."
                 return 1
             fi
@@ -2033,72 +1684,11 @@ ghs() {
                 echo "⚠️  Shell profile $shell_profile not found"
             fi
             ;;
-            
         "help"|"-h"|"--help")
-            # Show help
-            echo "🎯 GitHub Project Switcher (ghs)"
-            echo ""
-            echo "Global GitHub account switching with numbered users and project memory."
-            echo ""
-            echo "INSTALLATION:"
-            echo "  ghs install                Install to shell profile (auto-detects zsh/bash)"
-            echo "  ghs uninstall              Remove from shell profile"
-            echo ""
-            echo "SETUP:"
-            echo "  ghs add-user <username>    Add user with auto-detection of git config"
-            echo "  ghs add-user current       Add currently authenticated GitHub user"
-            echo ""
-            echo "DAILY WORKFLOW:"
-            echo "  ghs                        Show smart dashboard"
-            echo "  ghs switch <number>        Switch to user by number"
-            echo "  ghs assign <number>        Assign user as project default"
-            echo ""
-            echo "USER MANAGEMENT:"
-            echo "  ghs users                  Show numbered list of users"
-            echo "  ghs remove-user <user>     Remove user by name or number"
-            echo "  ghs profiles               Show user profiles (add --detailed for rich view)"
-            echo "  ghs update <user> <field> \"<value>\"  Update profile field (name, email, gpg)"
-            echo "  ghs validate [user]        Run profile validation check (all users or specific)"
-            echo ""
-            echo "PROJECT & STATUS:"
-            echo "  ghs status                 Show detailed current status"
-            echo "  ghs list                   List all configured projects"
+            show_help
             ;;
-            
         *)
             # Default action: show smart dashboard
-            # TEST: test_ghs_default_dashboard()
-            # - First time setup flow (no users file)
-            # - Normal dashboard display (with users)
-            # - gh not authenticated (should show onboarding)
-            # - gh command not found (should show installation help)
-            # - Current user not in list (should show add-user suggestion)
-            # - Git config mismatch (should show warning)
-            # - Project assignment workflows (should show relevant actions)
-            # - Performance with many users/projects (should be fast)
-            # 
-            # LIBRARY TRANSFORMATION NOTES:
-            # This entire dashboard would become: gh_switcher_show_dashboard()
-            # The data gathering would be separate from presentation:
-            # 
-            # Core data functions:
-            # - gh_switcher_get_current_project() -> string
-            # - gh_switcher_get_current_user() -> string  
-            # - gh_switcher_get_project_preference(project) -> string
-            # - gh_switcher_get_users() -> structured data
-            # - gh_switcher_check_gh_status() -> boolean + details
-            #
-            # UI functions (customizable):
-            # - gh_switcher_format_project_status()
-            # - gh_switcher_format_user_list() 
-            # - gh_switcher_format_quick_actions()
-            # - gh_switcher_format_dashboard() (orchestrates all above)
-            #
-            # This allows:
-            # - Custom branding/colors per tool
-            # - Different output formats (JSON, plain text, etc.)
-            # - Integration with other tools' UIs
-            
             # Check for first-time setup
             if [[ ! -f "$GH_USERS_CONFIG" || ! -s "$GH_USERS_CONFIG" ]]; then
                 first_time_setup
@@ -2113,32 +1703,32 @@ ghs() {
             # Show current project and user status
             echo "📍 Current project: $project"
             
-            if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-                local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "unknown")
+            if check_gh_auth; then
+                local current_user=$(get_current_github_user)
+                if [[ -z "$current_user" ]]; then
+                    current_user="unknown"
+                fi
                 
                 # Try to find current user ID
-                local current_user_id=""
+                local current_user_id=$(get_user_id "$current_user")
                 local user_in_list=false
-                if [[ -f "$GH_USERS_CONFIG" ]]; then
-                    current_user_id=$(grep -n "^$current_user$" "$GH_USERS_CONFIG" | cut -d: -f1)
-                    if [[ -n "$current_user_id" ]]; then
-                        user_in_list=true
-                    fi
+                if [[ -n "$current_user_id" ]]; then
+                    user_in_list=true
                 fi
                 
                 if [[ "$user_in_list" == true ]]; then
-                    echo "� Current user: $current_user (#$current_user_id)"
+                    echo "👤 Current user: $current_user (#$current_user_id)"
                     
                     # Show git config status
                     local profile=$(get_user_profile "$current_user")
                     if [[ $? -eq 0 ]]; then
                         local current_git_config=$(detect_git_config "auto")
                         if [[ $? -eq 0 ]]; then
-                            local current_git_name=$(echo "$current_git_config" | grep "^name:" | cut -d':' -f2-)
-                            local current_git_email=$(echo "$current_git_config" | grep "^email:" | cut -d':' -f2-)
+                            local current_git_name=$(field "$current_git_config" "name")
+                            local current_git_email=$(field "$current_git_config" "email")
                             
-                            local profile_name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-                            local profile_email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+                            local profile_name=$(field "$profile" "name")
+                            local profile_email=$(field "$profile" "email")
                             
                             if [[ -n "$current_git_name" && -n "$current_git_email" ]]; then
                                 if [[ "$current_git_name" == "$profile_name" && "$current_git_email" == "$profile_email" ]]; then
@@ -2153,10 +1743,10 @@ ghs() {
                             echo "❌ Git not available"
                         fi
                     else
-                        echo "� No profile configured"
+                        echo "👤 No profile configured"
                     fi
                 else
-                    echo "� Current user: $current_user"
+                    echo "👤 Current user: $current_user"
                     # Show onboarding prompt if user is not in list
                     if [[ "$current_user" != "unknown" && "$current_user" != "" ]]; then
                         echo ""
@@ -2173,10 +1763,7 @@ ghs() {
                 fi
                 
                 if [[ -n "$project_user" ]]; then
-                    local project_user_id=""
-                    if [[ -f "$GH_USERS_CONFIG" ]]; then
-                        project_user_id=$(grep -n "^$project_user$" "$GH_USERS_CONFIG" | cut -d: -f1)
-                    fi
+                    local project_user_id=$(get_user_id "$project_user")
                     
                     if [[ "$current_user" == "$project_user" ]]; then
                         echo "✅ Using correct account for this project!"
@@ -2198,20 +1785,22 @@ ghs() {
             echo ""
             
             # Show available users
-            if [[ -f "$GH_USERS_CONFIG" && -s "$GH_USERS_CONFIG" ]]; then
+            if has_users; then
                 echo "📋 Available users:"
                 local i=1
+                
+                # Get current user once for the entire loop
+                local dashboard_current_user=""
+                if check_gh_auth; then
+                    dashboard_current_user=$(get_current_github_user)
+                fi
+                
                 while IFS= read -r username; do
                     if [[ -n "$username" ]]; then
-                        if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-                            local current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
-                                                    if [[ "$username" == "$current_user" ]]; then
+                        if [[ "$username" == "$dashboard_current_user" ]]; then
                             echo "  ✅ $i. $username (current)"
                         else
                             echo "     $i. $username"
-                        fi
-                    else
-                        echo "     $i. $username"
                         fi
                         ((i++))
                     fi
@@ -2244,7 +1833,6 @@ ghs() {
 
 # If script is run directly (not sourced), execute the ghs function
 #
-# LIBRARY TRANSFORMATION NOTES - PACKAGE DISTRIBUTION:
 #
 # For global package distribution, this structure would change to:
 #
@@ -2276,10 +1864,6 @@ ghs() {
 # 4. Manual: curl -sSL install-script | bash
 #
 # MIGRATION STRATEGY:
-# - Detect existing ~/.gh-* files 
-# - Offer to migrate to new structure
-# - Provide uninstall script
-# - Backward compatibility mode
 #
 # CONFIGURATION HIERARCHY (library version):
 # 1. Command line flags: --config-dir, --namespace
@@ -2290,7 +1874,7 @@ ghs() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # Check for help flag specifically
     if [[ "$1" == "help" || "$1" == "-h" || "$1" == "--help" ]]; then
-        # Show help
+        # Show usage context for direct execution
         echo "🎯 GitHub Project Switcher"
         echo ""
         echo "This script can be used in two ways:"
@@ -2303,23 +1887,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         echo "2. Run directly (one-time):"
         echo "   ./gh-switcher.sh [command]"
         echo ""
-        echo "Commands:"
-        echo "  (no args)          Show smart dashboard with current status & quick actions"
-        echo "  status             Show detailed current status"
-        echo "  assign <user_or_id> Assign account as project default"
-        echo "  list               List all configured projects"
-        echo ""
-        echo "Installation:"
-        echo "  install            Install to shell profile (auto-detects zsh/bash)"
-        echo "  uninstall          Remove from shell profile"
-        echo ""
-        echo "User Management:"
-        echo "  add-user <user>    Add a user to the numbered list (use 'current' for active user)"
-        echo "  remove-user <user> Remove a user from the list (by name or number)"
-        echo "  users              Show numbered list of users"
-        echo "  switch <number>    Switch to user by number"
-        echo ""
-        echo "  help               Show this help message"
+        # Use the centralized help function
+        show_help
     else
         # Execute the ghs function with all arguments (or no arguments for default switch)
         ghs "$@"
@@ -2346,3 +1915,18 @@ fi
 # ESTIMATED EFFORT: 2-3 weeks for library transformation + packaging
 # CURRENT STATUS: Perfect for personal/team use, detailed roadmap for library use
 #═══════════════════════════════════════════════════════════════════════════════ 
+
+# (V3 profile helpers moved to top of file for proper function ordering)
+
+# Helper function to get user ID from username (DRY - 9 instances)
+get_user_id() {
+    local username="$1"
+    if [[ -f "$GH_USERS_CONFIG" ]]; then
+        grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d: -f1
+    fi
+}
+
+# Helper function to check if users config exists and has content (DRY)
+has_users() {
+    [[ -f "$GH_USERS_CONFIG" && -s "$GH_USERS_CONFIG" ]]
+}
