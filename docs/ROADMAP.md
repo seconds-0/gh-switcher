@@ -20,6 +20,9 @@ The tool works perfectly for personal and team use with the current simple imple
 - [ ] Project template patterns (`ghs set-pattern "work-*" work-account`)
 - [ ] Shell prompt integration function
 - [ ] Dry-run mode (`--dry-run`)
+- [ ] Guard hooks for account safety (`ghs guard install`) – see Documentation/Plans/FEAT-GuardHooks.md
+- [ ] SSH key guard & auto-config – see Documentation/Plans/FEAT-SSHKeyIntegration.md
+- [ ] GitHub auth token management & validation (plan TBD)
 
 ### Quality Improvements
 
