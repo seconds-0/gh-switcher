@@ -113,6 +113,31 @@ ghs update bob gpg "XYZ789GHI"
 - Git - for repository operations
 - Bash/Zsh shell
 
+## Development Setup (Contributors)
+
+To run linting and the BATS test-suite locally you need two extra tools:
+
+```bash
+# macOS (Homebrew)
+brew install shellcheck bats-core
+
+# Debian/Ubuntu (22.04+ ships bats-core ≥1.7)
+sudo apt-get update && sudo apt-get install -y shellcheck bats
+# For newer BATS on older Ubuntu: sudo add-apt-repository ppa:duggiefresh/bats && sudo apt-get install bats-core
+```
+
+Once installed:
+
+```bash
+npm run lint      # ShellCheck on gh-switcher.sh
+npm test          # Runs all BATS specs under tests/
+npm run ci-check  # Quick CI validation (recommended before pushing)
+npm run ci-test   # Comprehensive CI simulation (full environment testing)
+```
+
+> These tools are **development-only**; end-users who install `gh-switcher` via
+> curl or `npm install -g` do **not** need them.
+
 ## Performance
 
 - Commands complete in <100ms (enforced by automated benchmarks)

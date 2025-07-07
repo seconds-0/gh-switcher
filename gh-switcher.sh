@@ -113,57 +113,84 @@ write_profile_entry_v3() {
     return 0
 }
 
+# Minimal base64 encode shim for legacy v1/v2 profiles (ensures no colons in output)
+encode_profile_value() {
+    # Encode value into Base64 **without** any line wrapping so that profile lines remain single-line across platforms.
+    # We pipe through tr -d '\n' to strip the trailing newline as well as any internal wraps (BSD and GNU base64 compatibility).
+    printf '%s' "$1" | base64 | tr -d '\n'
+}
+
 # Minimal base64 decode shim for legacy v1/v2 profiles
-# Added during PostV3 cleanup – keep until legacy formats are removed entirely
 decode_profile_value() {
     printf '%s' "$1" | base64 --decode 2>/dev/null
 }
 
 # Helper function to add a user to the global list
 add_user() {
-    local username="$1"
+    local username=""; local ssh_key=""
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ssh-key)
+                ssh_key="$2"; shift 2;;
+            --*)
+                echo "❌ Unknown option: $1" >&2; return 1;;
+            *)
+                if [[ -z "$username" ]]; then
+                    username="$1"; shift;
+                else
+                    echo "❌ Unknown argument: $1" >&2; return 1;
+                fi;;
+        esac
+    done
+
     if [[ -z "$username" ]]; then
-        echo "❌ Usage: ghs add-user <username>"
+        echo "❌ Usage: ghs add-user <username> [--ssh-key <path>]" >&2
         return 1
     fi
-    
+
     # Validate username format
     if [[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-        echo "❌ Invalid username format"
+        echo "❌ Invalid username format" >&2
         return 1
     fi
-    
-    # Handle special "current" keyword
+
+    # Handle special "current" keyword (unchanged)
     if [[ "$username" == "current" ]]; then
         if check_gh_auth; then
             username=$(get_current_github_user)
             if [[ -z "$username" ]]; then
-                echo "❌ Could not detect current GitHub user"
-                echo "   Make sure you're authenticated with: gh auth login"
+                echo "❌ Could not detect current GitHub user" >&2
                 return 1
             fi
             echo "💡 Adding current GitHub user: $username"
         else
-            echo "❌ GitHub CLI not authenticated or not installed"
-            echo "   Run 'gh auth login' to get started"
+            echo "❌ GitHub CLI not authenticated or not installed" >&2
             return 1
         fi
     fi
-    
-    # Check if user already exists
+
+    # Deduplicate
     if [[ -f "$GH_USERS_CONFIG" ]] && grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
         echo "⚠️  User $username already exists in the list"
-        return 0
+    else
+        echo "$username" >> "$GH_USERS_CONFIG"
+        echo "✅ Added $username to user list"
     fi
-    
-    # Add user to the list
-    echo "$username" >> "$GH_USERS_CONFIG"
-    echo "✅ Added $username to user list"
-    
-    # Auto-create profile from current git config
-    create_user_profile "$username" "" "" "true"
-    
-    # Show current list with numbers
+
+    # Validate SSH key (warnings allowed)
+    if [[ -n "$ssh_key" ]]; then
+        if ! validate_ssh_key "$ssh_key" "true"; then
+            echo "⚠️  SSH key validation failed but continuing"
+            ssh_key="" # Clear invalid key
+        fi
+    fi
+
+    # Create or update profile
+    create_user_profile "$username" "" "" "false" "$ssh_key"
+
+    # Show list
     list_users
 }
 
@@ -217,11 +244,22 @@ list_users() {
     
     while IFS= read -r username; do
         if [[ -n "$username" ]]; then
-            # Check if this is the current user
+            # Determine SSH/HTTPS status
+            local profile_status=""
+            local profile_line="$(get_user_profile "$username" 2>/dev/null)"
+            if [[ -n "$profile_line" ]]; then
+                local ssh_key_field=$(echo "$profile_line" | grep "^ssh_key:" | cut -d':' -f2-)
+                if [[ -n "$ssh_key_field" ]]; then
+                    profile_status=" [SSH: $ssh_key_field]"
+                else
+                    profile_status=" [HTTPS]"
+                fi
+            fi
+
             if [[ "$username" == "$current_user" ]]; then
-                echo "  ✅ $i. $username (current)"
+                echo "  ✅ $i. $username$profile_status (current)"
             else
-                echo "     $i. $username"
+                echo "     $i. $username$profile_status"
             fi
             ((i++))
         fi
@@ -412,8 +450,6 @@ detect_auto_sign() {
     return 1
 }
 
-
-
 # Helper function to validate GPG key
 validate_gpg_key() {
     local gpg_key="$1"
@@ -441,8 +477,35 @@ validate_gpg_key() {
 
 # Helper function to write profile safely
 write_profile_entry() {
-    # Wrapper to new plain-text v3 writer; keeps existing call-sites intact.
-    write_profile_entry_v3 "$@"
+    local username="$1"; local name="$2"; local email="$3"; local ssh_key="${4:-}"
+
+    # Basic validations (keep lightweight)
+    if [[ -z "$username" || -z "$name" || -z "$email" ]]; then
+        echo "❌ write_profile_entry: username, name, and email required" >&2
+        return 1
+    fi
+
+    # Encode name/email to avoid colons & special chars
+    local enc_name enc_email
+    enc_name=$(encode_profile_value "$name")
+    enc_email=$(encode_profile_value "$email")
+
+    # Build v2 5-field line: username:2:<enc_name>:<enc_email>:<ssh_key>
+    local line="$username:2:$enc_name:$enc_email:$ssh_key"
+
+    # Ensure directory exists & write atomically
+    mkdir -p "$(dirname "$GH_USER_PROFILES")" 2>/dev/null || true
+    local tmp="${GH_USER_PROFILES}.tmp.$$"
+    trap 'rm -f "$tmp"' EXIT
+
+    if [[ -f "$GH_USER_PROFILES" ]]; then
+        grep -v "^$username:" "$GH_USER_PROFILES" > "$tmp" || true
+    fi
+    echo "$line" >> "$tmp"
+    chmod 600 "$tmp"
+    mv "$tmp" "$GH_USER_PROFILES"
+    trap - EXIT
+    return 0
 }
 
 # Helper function to create a user profile with enhanced data capture
@@ -451,7 +514,7 @@ create_user_profile() {
     local name="$2"
     local email="$3"
     local auto_capture="${4:-false}"  # Whether to auto-capture from current git config
-    local gpg_key="${5:-}"
+    local ssh_key="${5:-}"
     local auto_sign="${6:-}"
     
     if [[ -z "$username" ]]; then
@@ -491,9 +554,10 @@ create_user_profile() {
             fi
         fi
         
-        # Auto-detect GPG key if not provided
-        if [[ -z "$gpg_key" ]]; then
-            gpg_key=$(detect_gpg_key "auto")
+        # Auto-detect SSH key if not provided
+        if [[ -z "$ssh_key" ]]; then
+            # ssh_key auto-detection disabled
+            :  # auto-detection disabled
         fi
         
         # Auto-detect auto-sign preference if not provided
@@ -513,11 +577,11 @@ create_user_profile() {
         auto_sign="false"
     fi
     
-    # Write the profile
-    if write_profile_entry "$username" "$name" "$email" "$gpg_key" "$auto_sign"; then
+    # Write the profile (ssh_key used in place of gpg_key for v2 compatibility)
+    if write_profile_entry "$username" "$name" "$email" "$ssh_key"; then
         echo "✅ Created profile for $username: $name <$email>"
-        if [[ -n "$gpg_key" ]]; then
-            echo "   🔑 GPG key: $gpg_key (auto-sign: $auto_sign)"
+        if [[ -n "$ssh_key" ]]; then
+            echo "   🔑 SSH key: $ssh_key"
         fi
         return 0
     else
@@ -552,7 +616,23 @@ get_user_profile() {
             # Check if it's new format (5 fields) or old format (7+ fields)
             local field_count=$(echo "$profile_line" | tr ':' '\n' | wc -l)
             
-            if [[ $field_count -eq 6 ]]; then
+            if [[ $field_count -eq 5 ]]; then
+                # Simplified v2 format: username:2:base64(name):base64(email):ssh_key
+                local encoded_name=$(echo "$profile_line" | cut -d':' -f3)
+                local encoded_email=$(echo "$profile_line" | cut -d':' -f4)
+                local ssh_key_field=$(echo "$profile_line" | cut -d':' -f5)
+
+                local name=$(decode_profile_value "$encoded_name")
+                local email=$(decode_profile_value "$encoded_email")
+
+                if [[ -n "$name" && -n "$email" ]]; then
+                    echo "name:$name"
+                    echo "email:$email"
+                    echo "ssh_key:$ssh_key_field"
+                    echo "version:2"
+                    return 0
+                fi
+            elif [[ $field_count -eq 6 ]]; then
                 # New version 2 format: username:2:base64(name):base64(email):base64(gpg_key):auto_sign
                 local encoded_name=$(echo "$profile_line" | cut -d':' -f3)
                 local encoded_email=$(echo "$profile_line" | cut -d':' -f4)
@@ -1040,8 +1120,6 @@ run_profile_health_check() {
     return 0
 }
 
-
-
 # Helper function to apply user profile (set git config from stored profile)
 apply_user_profile() {
     local username="$1"
@@ -1062,6 +1140,7 @@ apply_user_profile() {
     local email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
     local gpg_key=$(echo "$profile" | grep "^gpg_key:" | cut -d':' -f2-)
     local auto_sign=$(echo "$profile" | grep "^auto_sign:" | cut -d':' -f2-)
+    local ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
     
     if [[ -z "$name" || -z "$email" ]]; then
         echo "❌ Invalid profile data for user: $username"
@@ -1072,6 +1151,11 @@ apply_user_profile() {
     if ! apply_git_config "$name" "$email" "$scope"; then
         echo "❌ Failed to apply profile for user: $username"
         return 1
+    fi
+    
+    # Apply SSH configuration
+    if ! apply_ssh_config "$ssh_key" "$scope"; then
+        echo "⚠️  SSH configuration failed or not applied"
     fi
     
     # Apply GPG configuration if available
@@ -1189,110 +1273,97 @@ apply_git_config() {
     fi
 }
 
-# Helper function to perform first-time setup
-first_time_setup() {
-    # Check if GitHub CLI is available and authenticated
-    if ! check_gh_auth; then
-        echo "⚠️  GitHub CLI not authenticated"
-        echo "   Run 'gh auth login' to get started, then try again"
-        return 1
-    fi
-    
-    # Get current GitHub user
-    local current_user=$(get_current_github_user)
-    if [[ -z "$current_user" ]]; then
-        echo "❌ Could not detect current GitHub user"
-        return 1
-    fi
-    
-    echo "🎯 First-time setup detected!"
-    echo "📝 Current GitHub user: $current_user"
-    echo "💾 Creating profile from current git config..."
-    
-    # Add current user to the list (this will auto-create profile)
-    add_user "$current_user" >/dev/null 2>&1
-    
-    # Assign current user to current project
-    local project="$(basename "$PWD")"
-    touch "$GH_PROJECT_CONFIG"
-    grep -v "^$project=" "$GH_PROJECT_CONFIG" > "${GH_PROJECT_CONFIG}.tmp" 2>/dev/null || true
-    echo "$project=$current_user" >> "${GH_PROJECT_CONFIG}.tmp"
-    mv "${GH_PROJECT_CONFIG}.tmp" "$GH_PROJECT_CONFIG"
-    
-    echo "✅ Setup complete!"
-    echo "   • Added $current_user to user list"
-    echo "   • Created git config profile"
-    echo "   • Assigned $current_user to project: $project"
-    echo ""
-    
-    return 0
-}
+# Helper function to apply SSH configuration with validation
+apply_ssh_config() {
+    local key_path="$1"; local scope="${2:-local}"
 
-# Helper function to remove a user from the global list
-#
-remove_user() {
-    local input="$1"
-    if [[ -z "$input" ]]; then
-        echo "❌ Usage: ghs remove-user <username_or_number>"
-        echo "   Use 'ghs users' to see available users"
+    # Validate scope
+    if [[ "$scope" != "local" && "$scope" != "global" ]]; then
+        echo "❌ Invalid scope" >&2
         return 1
     fi
-    
-    # Get username from ID or use directly
-    local username=""
-    local user_id=""
-    if [[ "$input" =~ ^[0-9]+$ ]]; then
-        username=$(get_user_by_id "$input")
-        if [[ $? -ne 0 ]]; then
+
+    local git_flags=""
+    if [[ "$scope" == "global" ]]; then
+        git_flags="--global"
+    else
+        git_flags="--local"
+        # Must be inside git repo for local
+        if ! git rev-parse --git-dir >/dev/null 2>&1; then
+            echo "❌ Not in a git repository" >&2
             return 1
         fi
-        user_id="$input"
-        echo "💡 Removing user #$user_id: $username"
-    else
-        username="$input"
-        # Find the user ID for display purposes
-        user_id=$(get_user_id "$username")
     fi
-    
-    # Check if user exists in our list
-    if [[ ! -f "$GH_USERS_CONFIG" ]] || ! grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
-        echo "❌ User $username not found in user list"
-        echo "   Use 'ghs users' to see available users"
+
+    if [[ -z "$key_path" ]]; then
+        # Remove existing config
+        git config $git_flags --unset core.sshCommand 2>/dev/null || true
+        echo "✅ Removed SSH config"
+        return 0
+    fi
+
+    # Ensure key is valid (do NOT auto-fix perms here)
+    if ! validate_ssh_key "$key_path" "false"; then
         return 1
     fi
-    
-    # Check if user is currently active (warn but don't block)
-    if check_gh_auth; then
-        local current_user=$(get_current_github_user)
-        if [[ "$username" == "$current_user" ]]; then
-            echo "⚠️  Warning: You're removing the currently active GitHub user"
+
+    key_path="${key_path/#\~\//${HOME}/}"
+    if git config $git_flags core.sshCommand "ssh -i '$key_path' -o IdentitiesOnly=yes"; then
+        echo "✅ Configured SSH key: $key_path"
+        return 0
+    else
+        echo "❌ Failed to configure SSH key" >&2
+        return 1
+    fi
+}
+
+# Helper function to validate SSH key
+validate_ssh_key() {
+    local key_path="$1"; local fix_perms="${2:-false}"
+
+    # Empty path is acceptable (HTTPS mode)
+    if [[ -z "$key_path" ]]; then
+        return 0
+    fi
+
+    # Expand ~ and make absolute
+    key_path="${key_path/#\~\//${HOME}/}"
+
+    # Block directory-traversal attempts
+    if [[ "$key_path" == *".."* ]]; then
+        echo "❌ directory traversal detected" >&2
+        return 1
+    fi
+
+    if [[ ! -f "$key_path" ]]; then
+        echo "❌ SSH key not found: $key_path" >&2
+        return 1
+    fi
+
+    # Basic private-key header check
+    if ! grep -q "BEGIN .*PRIVATE KEY" "$key_path" 2>/dev/null; then
+        echo "❌ doesn't appear to be a private key" >&2
+        return 1
+    fi
+
+    # Permission check (must be 600)
+    local perms
+    perms=$(stat -c %a "$key_path" 2>/dev/null || stat -f %Lp "$key_path" 2>/dev/null)
+    if [[ "$perms" != "600" ]]; then
+        if [[ "$fix_perms" == "true" ]]; then
+            if chmod 600 "$key_path" 2>/dev/null; then
+                echo "✅ Set permissions to 600"
+            else
+                echo "❌ Failed to set permissions on $key_path" >&2
+                return 1
+            fi
+        else
+            echo "❌ SSH key has incorrect permissions ($perms). Expected 600." >&2
+            return 1
         fi
     fi
-    
-    # Remove user from list
-    if [[ -f "$GH_USERS_CONFIG" ]]; then
-        grep -v "^$username$" "$GH_USERS_CONFIG" > "${GH_USERS_CONFIG}.tmp" 2>/dev/null || true
-        mv "${GH_USERS_CONFIG}.tmp" "$GH_USERS_CONFIG"
-    fi
-    
-    # Clean up project configurations that reference this user
-    local affected_projects=""
-    if [[ -f "$GH_PROJECT_CONFIG" ]]; then
-        affected_projects=$(grep "=$username$" "$GH_PROJECT_CONFIG" | cut -d'=' -f1 | tr '\n' ' ')
-        grep -v "=$username$" "$GH_PROJECT_CONFIG" > "${GH_PROJECT_CONFIG}.tmp" 2>/dev/null || true
-        mv "${GH_PROJECT_CONFIG}.tmp" "$GH_PROJECT_CONFIG"
-    fi
-    
-    # Report results
-    echo "✅ Removed $username from user list"
-    if [[ -n "$affected_projects" ]]; then
-        echo "🧹 Cleaned up project configurations: $affected_projects"
-        echo "   These projects now have no default user configured"
-    fi
-    
-    # Show updated list
-    echo ""
-    list_users
+
+    return 0
 }
 
 # Command functions for cleaner dispatcher
@@ -1929,4 +2000,53 @@ get_user_id() {
 # Helper function to check if users config exists and has content (DRY)
 has_users() {
     [[ -f "$GH_USERS_CONFIG" && -s "$GH_USERS_CONFIG" ]]
+}
+
+# =====================
+# User removal helper (v2 tests rely on this)
+# =====================
+
+remove_user() {
+    local input="$1"
+
+    # Usage check
+    if [[ -z "$input" ]]; then
+        echo "❌ Usage: ghs remove-user <username_or_number>"
+        return 1
+    fi
+
+    # No users configured?
+    if [[ ! -s "$GH_USERS_CONFIG" ]]; then
+        echo "❌ No users configured" >&2
+        return 1
+    fi
+
+    local username=""; local user_id=""
+
+    if [[ "$input" =~ ^[0-9]+$ ]]; then
+        # Numeric ID
+        user_id="$input"
+        username=$(get_user_by_id "$user_id" 2>/dev/null)
+        if [[ $? -ne 0 ]]; then
+            echo "❌ User ID $user_id not found in user list" >&2
+            return 1
+        fi
+        echo "Removing user #$user_id: $username"
+    else
+        username="$input"
+        # Locate ID for display (optional)
+        user_id=$(grep -n "^$username$" "$GH_USERS_CONFIG" | cut -d':' -f1 | head -1)
+    fi
+
+    # Confirm existence
+    if ! grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
+        echo "❌ $username not found in user list" >&2
+        return 1
+    fi
+
+    # Remove from list
+    grep -v "^$username$" "$GH_USERS_CONFIG" > "${GH_USERS_CONFIG}.tmp" || true
+    mv "${GH_USERS_CONFIG}.tmp" "$GH_USERS_CONFIG"
+
+    echo "✅ Removed $username from user list"
 }
