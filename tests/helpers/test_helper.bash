@@ -3,10 +3,12 @@
 # Main test helper for gh-switcher testing
 # Provides common utilities and setup for all tests
 
-# Set up test environment isolation
+# Set up test environment
 setup_test_environment() {
     # Create isolated test environment
-    export TEST_HOME="$BATS_TMPDIR/gh-switcher-test-$$"
+    # Fallback to /tmp if BATS_TMPDIR is not set
+    local tmpdir="${BATS_TMPDIR:-/tmp}"
+    export TEST_HOME="$tmpdir/gh-switcher-test-$$"
     export ORIGINAL_HOME="$HOME"
     export HOME="$TEST_HOME"
     
@@ -19,7 +21,27 @@ setup_test_environment() {
     mkdir -p "$TEST_HOME"
     
     # Source the gh-switcher script for function access
-    source "$BATS_TEST_DIRNAME/../gh-switcher.sh"
+    # Use fallback paths if BATS_TEST_DIRNAME is not set
+    local script_path
+    if [[ -n "$BATS_TEST_DIRNAME" ]]; then
+        script_path="$BATS_TEST_DIRNAME/../../gh-switcher.sh"
+    else
+        # Fallback: assume we're in the project root or find it
+        script_path="$(dirname "$0")/../../gh-switcher.sh"
+        if [[ ! -f "$script_path" ]]; then
+            script_path="./gh-switcher.sh"
+        fi
+        if [[ ! -f "$script_path" ]]; then
+            script_path="$(find . -name "gh-switcher.sh" -type f | head -1)"
+        fi
+    fi
+    
+    if [[ -f "$script_path" ]]; then
+        source "$script_path"
+    else
+        echo "Error: Cannot find gh-switcher.sh script" >&2
+        return 1
+    fi
 }
 
 # Clean up test environment

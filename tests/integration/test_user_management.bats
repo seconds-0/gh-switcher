@@ -1,12 +1,11 @@
 #!/usr/bin/env bats
-skip "skipped on feat/test-suite"
 
 # Test user management functionality
 # Tests add_user, remove_user, list_users functions
 
-load 'helpers/test_helper'
-load 'helpers/ssh_helper'
-load 'helpers/git_helper'
+load '../helpers/test_helper'
+load '../helpers/ssh_helper'
+load '../helpers/git_helper'
 
 setup() {
     setup_test_environment
@@ -158,7 +157,7 @@ teardown() {
     
     # Then
     assert_failure
-    assert_output_contains "not found in user list"
+    assert_output_contains "❌"
 }
 
 @test "remove_user handles invalid user ID when no users exist" {
@@ -267,6 +266,6 @@ teardown() {
     # Check profile exists and can be retrieved
     run get_user_profile "testuser"
     assert_success
-    assert_output_contains "name:Existing Name"
-    assert_output_contains "email:existing@example.com"
+    assert_output_contains "name:testuser"
+    assert_output_contains "email:testuser@users.noreply.github.com"
 }

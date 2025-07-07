@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "feat/**", "fix/**", "chore/**" ]
+  pull_request:
+
+jobs:
+  build-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Set up Node (for npm lint/test/build scripts)
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+
+      # Install system deps: ShellCheck ≥1.0 & BATS ≥1.10
+      - name: Install ShellCheck & BATS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:duggiefresh/bats
+          sudo apt-get update -y
+          sudo apt-get install -y shellcheck bats-core
+
+      - name: Install ShellCheck & BATS (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install shellcheck bats-core
+
+      # Install npm dependencies (none yet, but future-proof)
+      - name: Install npm dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      # Run repository verification sequence (lint → test → build)
+      - name: Run lint → test → build
+        run: |
+          npm run lint --if-present
+          npm test
+          npm run build --if-present 

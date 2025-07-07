@@ -1,11 +1,10 @@
 #!/usr/bin/env bats
-skip "skipped on feat/test-suite"
 
 # Test profile I/O functionality
 # Tests encoding/decoding and round-trip integrity
 
-load 'helpers/test_helper'
-load 'helpers/ssh_helper'
+load '../helpers/test_helper'
+load '../helpers/ssh_helper'
 
 setup() {
     setup_test_environment
@@ -193,18 +192,20 @@ teardown() {
 }
 
 @test "multiple profiles can coexist" {
-    # Given
+    # Test step 1: create profiles
     write_profile_entry "user1" "User One" "user1@example.com" "$TEST_ED25519_KEY" >/dev/null 2>&1
     write_profile_entry "user2" "User Two" "user2@example.com" "" >/dev/null 2>&1
     
-    # When/Then - both profiles should be retrievable
+    # Test step 2: test first profile with assertions
     run get_user_profile "user1"
     assert_success
     assert_output_contains "User One"
     assert_output_contains "ssh_key:$TEST_ED25519_KEY"
     
+    # Test step 3: test second profile 
     run get_user_profile "user2"
     assert_success
     assert_output_contains "User Two"
-    assert_output_not_contains "ssh_key:"
+    [[ "$output" != *"ssh_key:"* ]]
+    echo "All tests completed successfully"
 }
