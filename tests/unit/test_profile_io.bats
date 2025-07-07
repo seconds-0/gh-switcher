@@ -206,6 +206,5 @@ teardown() {
     run get_user_profile "user2"
     assert_success
     assert_output_contains "User Two"
-    [[ "$output" != *"ssh_key:"* ]]
-    echo "All tests completed successfully"
+    assert_output_not_contains "ssh_key:"
 }
