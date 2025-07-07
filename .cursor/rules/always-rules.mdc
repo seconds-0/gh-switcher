@@ -57,6 +57,7 @@ ghs assign 1
   * ⚠️ warning
   * ❌ error
   * 💡 tip
+* Base64 encoding for config values **MUST** produce single-line output – pipe through `tr -d '\n'` or use `base64 --wrap=0` to prevent wrapped lines that would corrupt profile files.
 
 ## 6. Error-Handling Template
 ```bash

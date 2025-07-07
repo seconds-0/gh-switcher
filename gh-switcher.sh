@@ -115,7 +115,9 @@ write_profile_entry_v3() {
 
 # Minimal base64 encode shim for legacy v1/v2 profiles (ensures no colons in output)
 encode_profile_value() {
-    printf '%s' "$1" | base64 2>/dev/null
+    # Encode value into Base64 **without** any line wrapping so that profile lines remain single-line across platforms.
+    # We pipe through tr -d '\n' to strip the trailing newline as well as any internal wraps (BSD and GNU base64 compatibility).
+    printf '%s' "$1" | base64 | tr -d '\n'
 }
 
 # Minimal base64 decode shim for legacy v1/v2 profiles
