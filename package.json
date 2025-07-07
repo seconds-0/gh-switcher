@@ -10,6 +10,8 @@
     "lint": "shellcheck -x -e SC1091,SC2155,SC2181 gh-switcher.sh",
     "test": "bats -r tests",
     "build": "echo 'No build step needed for bash project' && exit 0",
+    "ci-check": "./scripts/ci-check.sh",
+    "ci-test": "./scripts/local-ci-test.sh",
     "install-global": "echo 'source $(pwd)/gh-switcher.sh' >> ~/.zshrc && echo 'Added to ~/.zshrc - restart your terminal'",
     "uninstall-global": "sed -i.bak '/gh-switcher.sh/d' ~/.zshrc && echo 'Removed from ~/.zshrc'"
   },

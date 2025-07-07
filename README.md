@@ -129,8 +129,10 @@ sudo apt-get update && sudo apt-get install -y shellcheck bats
 Once installed:
 
 ```bash
-npm run lint  # ShellCheck on gh-switcher.sh
-npm test      # Runs all BATS specs under tests/
+npm run lint      # ShellCheck on gh-switcher.sh
+npm test          # Runs all BATS specs under tests/
+npm run ci-check  # Quick CI validation (recommended before pushing)
+npm run ci-test   # Comprehensive CI simulation (full environment testing)
 ```
 
 > These tools are **development-only**; end-users who install `gh-switcher` via
