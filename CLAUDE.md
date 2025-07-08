@@ -23,8 +23,7 @@ npm run ci-test
 npm run install-global
 
 # Install guard hooks for account validation  
-npm run guard-install
-# OR: ghs guard install
+ghs guard install
 ```
 
 ### Development Workflow
@@ -42,6 +41,10 @@ npm test
 
 # Before committing
 npm run ci-check
+
+# Development convenience scripts (use ghs commands directly for user features)
+npm run install-hook    # Development shortcut for: ghs guard install
+npm run uninstall-hook  # Development shortcut for: ghs guard uninstall
 ```
 
 ## Testing Architecture
@@ -109,10 +112,6 @@ ghs guard test
 
 # Remove guard hooks
 ghs guard uninstall
-
-# Alternative npm scripts (backward compatibility)
-npm run guard-install    # Same as: ghs guard install
-npm run guard-uninstall  # Same as: ghs guard uninstall
 ```
 
 #### What it validates
