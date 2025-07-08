@@ -99,3 +99,28 @@ teardown() {
     GHS_SKIP_HOOK=1 run bash "$TEST_GUARD_SCRIPT"
     assert_success
 }
+
+@test "guard hook executes within performance requirements" {
+    run_guard_command "install"
+    assert_success
+    
+    # Time the hook execution using gdate if available, otherwise use seconds
+    cd "$TEST_GIT_REPO"
+    if command -v gdate >/dev/null 2>&1; then
+        local start_ms=$(gdate +%s%3N 2>/dev/null || echo "0")
+        run_guard_hook
+        local end_ms=$(gdate +%s%3N 2>/dev/null || echo "1000")
+        local execution_time=$((end_ms - start_ms))
+        
+        # Performance requirement: <300ms (reasonable for pre-commit validation)
+        [[ $execution_time -lt 300 ]]
+    else
+        # Fallback to seconds-based timing
+        local start_time=$(date +%s)
+        run_guard_hook
+        local end_time=$(date +%s)
+        local execution_time=$((end_time - start_time))
+        # Performance requirement: <1 second (generous fallback)
+        [[ $execution_time -lt 1 ]]
+    fi
+}

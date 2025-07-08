@@ -1,7 +1,21 @@
 # CLAUDE.md - Build and Development Guide
 
 ## Project Overview
-gh-switcher is a lightweight GitHub account switcher with numbered users and project memory. This is a Bash-based CLI tool for managing multiple GitHub accounts with comprehensive testing and quality assurance.
+gh-switcher (`ghs`) is a lightning-fast, scriptable GitHub account switcher for developers with multiple GitHub identities. This is a Bash-based CLI tool focused exclusively on GitHub authentication context switching.
+
+## Project Philosophy
+- **CLI-first**: Commands must work perfectly in scripts and automation
+- **Simple over complex**: Resist feature creep and over-engineering  
+- **Automation-friendly**: Every feature supports non-interactive use
+- **Project-aware**: Context-sensitive behavior based on git repository
+- **Resist scope-creep**: GitHub account switching only, not generic git tools
+
+### Implementation Guidelines
+- **Function size**: <50 lines preferred for Bash functions
+- **Test approach**: Unit tests + ≥1 higher layer (not exhaustive coverage)
+- **Feature scope**: Minimal viable implementation first
+- **Pattern matching**: Follow existing command patterns (cmd_switch, cmd_add, etc.)
+- **Anti-patterns**: Avoid over-engineering, enterprise patterns, interactive TUIs
 
 ## Build Commands
 
@@ -47,12 +61,13 @@ npm run install-hook    # Development shortcut for: ghs guard install
 npm run uninstall-hook  # Development shortcut for: ghs guard uninstall
 ```
 
-## Testing Architecture
+## Testing (BATS-first)
 
-### Test Rules (3-tier system)
-- **Unit tests** (`tests/unit/`): Pure functions, <200ms per file
-- **Service tests** (`tests/service/`): External command calls, <500ms per file  
-- **Integration tests** (`tests/integration/`): End-to-end workflows, ≤5s per file
+### Framework & Structure
+- **Primary**: bats-core 1.10+ (Vitest only with maintainer approval)
+- **Layout**: `tests/unit/` (fast) and `tests/integration/` (CLI workflows)
+- **Approach**: Unit tests + ≥1 higher layer per feature (not exhaustive coverage)
+- **Performance**: <5s per BATS file on ubuntu-latest runners
 
 ### Test Environment
 - Every BATS file loads `helpers/test_helper` and sets up isolated `$TEST_HOME`
@@ -60,27 +75,25 @@ npm run uninstall-hook  # Development shortcut for: ghs guard uninstall
 - Tag slow specs with `@slow` for nightly CI
 - Structure helpers under `tests/helpers/` to avoid duplication
 
-### Risk-Based Test Prioritization
-- **P0 - Data Integrity**: Corrupts or loses user data
-- **P1 - Core Workflows**: Blocks daily work  
-- **P2 - Security & Permission**: Security leaks, incorrect auth
-- **P3 - UX & Performance**: User confusion, slowness >100ms
+### Quality Standards
+- **100% Test Execution**: Every detected test MUST execute
+- **Zero Failures**: All tests must pass, no exceptions
+- **Legitimate Skips Only**: Only skip for missing external dependencies (e.g., `gpg`)
+- **Root Cause Fixes**: Never work around test failures
 
 ## Quality Standards
 
 ### Performance Requirements
-- Commands must complete in <100ms
-- Unit tests: <200ms per file
-- Service tests: <500ms per file
-- Integration tests: ≤5s per file
+- **CLI commands**: <100ms completion time
+- **Guard hooks**: <300ms execution time
+- **BATS files**: <5s per file on ubuntu-latest runners
 
 ### Code Quality
-- ShellCheck compliance with exclusions: SC1091, SC2155, SC2181
-- All functions must have error handling using the template format
-- Atomic file operations for data safety
-- Input validation and sanitization
-- **ZERO TOLERANCE**: 100% test execution, zero failures, legitimate skips only
-- Base64 encoding MUST produce single-line output (use `tr -d '\n'` or `base64 --wrap=0`)
+- **ShellCheck**: Compliance with exclusions: SC1091, SC2155, SC2181
+- **Error handling**: All functions use the template format
+- **Data safety**: Atomic file operations with temp files
+- **Input validation**: Sanitize all user input
+- **Base64**: Single-line output only (use `tr -d '\n'` or `base64 --wrap=0`)
 
 ### Data Safety Rules
 - Use atomic file operations with temp files
@@ -92,9 +105,18 @@ npm run uninstall-hook  # Development shortcut for: ghs guard uninstall
 
 ### Always Rules
 - **Data Safety**: Atomic operations, no data loss
-- **Performance**: <100ms command completion
+- **Performance**: <100ms command completion (guard hooks <300ms execution)
 - **Security**: SSH key validation, input sanitization
 - **Non-Interactive**: All commands work in scripts/automation
+
+### Anti-Patterns to Avoid
+- **Over-engineering**: Complex solutions for simple problems
+- **Function bloat**: >50 lines per Bash function
+- **Test explosion**: Creating 3:1 test-to-code ratios
+- **Enterprise patterns**: Applied to simple CLI tool
+- **Interactive TUIs**: Main-menu interfaces
+- **Scope creep**: Non-GitHub account features
+- **Hard-coded paths**: Absolute paths or unscoped temp files
 
 ### Guard Hooks (Account Validation)
 The project includes guard hooks that validate GitHub account and git profile before commits to prevent wrong-account commits.
@@ -145,13 +167,7 @@ GHS_SKIP_HOOK=1 git commit -m "your message"
 - **Provides guidance** on how to fix issues
 - **Backs up existing hooks** during installation
 
-### Code Patterns
-- Follow existing code style and conventions
-- Use comprehensive error handling (avoid `2>/dev/null`)
-- Add detailed error messages for common failure scenarios
-- Validate all inputs before processing
-
-### Error Handling Template
+### Code Patterns & Error Handling
 All functions should follow this template pattern:
 
 ```bash
@@ -172,15 +188,16 @@ some_action() {
 - Exit early with meaningful status codes
 - Use feedback icons: ✅ success, ⚠️ warning, ❌ error, 💡 tip
 - Name helpers with action verbs (`load_users`, `save_mapping`)
+- Validate all inputs before processing
+- Avoid `2>/dev/null` - use proper error handling
 
 ### Testing Requirements
-- New features MUST include tests hitting at least unit + one higher layer
-- For risky refactors add contract tests to lock behavior before change
-- Target ≥80% function coverage
-- Test special characters, error scenarios, and edge cases
-- **ZERO TOLERANCE POLICY**: All tests must pass, no exceptions
-- Only skip tests for missing external dependencies (e.g., `gpg` binary)
-- Use systematic debugging: research → isolate → fix root cause
+- **New features**: Unit tests + ≥1 higher layer (not exhaustive coverage)
+- **Test focus**: User workflows over implementation details
+- **Realistic scenarios**: Avoid edge cases and over-engineering
+- **ZERO TOLERANCE**: All tests must pass, no exceptions
+- **Skips only**: For missing external dependencies (e.g., `gpg` binary)
+- **Debugging**: Research → isolate → fix root cause (no workarounds)
 
 ### Test Debugging Methodology
 When tests fail, follow this systematic approach:
