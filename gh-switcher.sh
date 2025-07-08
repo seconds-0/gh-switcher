@@ -1621,10 +1621,16 @@ cmd_status() {
 cmd_guard() {
     local subcommand="${1:-}"
     local project="$(basename "$PWD")"
+    local force_flag=""
+    
+    # Check for --force flag
+    if [[ "${2:-}" == "--force" ]]; then
+        force_flag="--force"
+    fi
     
     case "$subcommand" in
         "install")
-            cmd_guard_install
+            cmd_guard_install "$force_flag"
             ;;
         "uninstall")
             cmd_guard_uninstall
@@ -1644,8 +1650,12 @@ cmd_guard() {
             echo "  status      Show guard status and validation state"
             echo "  test        Test validation without installing"
             echo ""
+            echo "Options:"
+            echo "  --force     Skip confirmation prompts (install only)"
+            echo ""
             echo "Examples:"
             echo "  ghs guard install        # Enable protection for this repo"
+            echo "  ghs guard install --force  # Install without prompts"
             echo "  ghs guard status         # Check if protection is active"
             echo "  ghs guard test           # Dry run validation"
             return 1
@@ -1654,20 +1664,43 @@ cmd_guard() {
 }
 
 cmd_guard_install() {
+    local force_flag="${1:-}"
+    
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         echo "❌ Not in a git repository"
         echo "   Navigate to a git repository to install guard hooks"
         return 1
     fi
 
-    local hook_script="$(git rev-parse --show-toplevel)/scripts/guard-hook.sh"
-    local hook_target="$(git rev-parse --show-toplevel)/.git/hooks/pre-commit"
+    # Find guard-hook.sh relative to gh-switcher installation
+    local hook_script=""
+    if [[ -n "${GH_SWITCHER_PATH:-}" && -f "${GH_SWITCHER_PATH%/*}/scripts/guard-hook.sh" ]]; then
+        # Use directory of GH_SWITCHER_PATH
+        hook_script="${GH_SWITCHER_PATH%/*}/scripts/guard-hook.sh"
+    elif [[ -f "$(dirname "$0")/scripts/guard-hook.sh" ]]; then
+        # Relative to this script
+        hook_script="$(dirname "$0")/scripts/guard-hook.sh"
+    elif command -v ghs >/dev/null 2>&1; then
+        # Find via ghs command
+        local ghs_path=$(readlink -f "$(which ghs)" 2>/dev/null || which ghs)
+        if [[ -f "${ghs_path%/*}/scripts/guard-hook.sh" ]]; then
+            hook_script="${ghs_path%/*}/scripts/guard-hook.sh"
+        fi
+    fi
     
     if [[ ! -f "$hook_script" ]]; then
-        echo "❌ Guard hook script not found at $hook_script"
+        echo "❌ Guard hook script not found"
         echo "   Make sure gh-switcher is properly installed"
+        echo "   Expected locations:"
+        echo "   - \${GH_SWITCHER_PATH%/*}/scripts/guard-hook.sh"
+        echo "   - \$(dirname \$0)/scripts/guard-hook.sh"
+        echo "   - \$(dirname \$(which ghs))/scripts/guard-hook.sh"
         return 1
     fi
+    
+    local hook_target="$(git rev-parse --show-toplevel)/.git/hooks/pre-commit"
+    
+    echo "🔧 Installing guard hooks from: $hook_script"
     
     # Check if hook already exists
     if [[ -f "$hook_target" ]]; then
@@ -1676,14 +1709,20 @@ cmd_guard_install() {
             return 0
         else
             echo "⚠️  Existing pre-commit hook found"
-            echo "   Backup and replace? (y/N):"
-            read -r response
-            if [[ "$response" != "y" && "$response" != "Y" ]]; then
-                echo "❌ Installation cancelled"
-                return 1
+            if [[ "$force_flag" == "--force" ]]; then
+                echo "   Force flag enabled - backing up and replacing"
+                mv "$hook_target" "${hook_target}.backup.$(date +%s)"
+                echo "💾 Backed up existing hook"
+            else
+                echo "   Backup and replace? (y/N):"
+                read -r response
+                if [[ "$response" != "y" && "$response" != "Y" ]]; then
+                    echo "❌ Installation cancelled"
+                    return 1
+                fi
+                mv "$hook_target" "${hook_target}.backup.$(date +%s)"
+                echo "💾 Backed up existing hook"
             fi
-            mv "$hook_target" "${hook_target}.backup.$(date +%s)"
-            echo "💾 Backed up existing hook"
         fi
     fi
     
