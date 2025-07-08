@@ -254,6 +254,36 @@ Use `npm run ci-check` before pushing to ensure:
 - Bash compatibility verified
 - Temporary files cleaned
 
+## Pull Request Creation Process
+
+### Step 1: Create PR Body File
+Create a temporary markdown file with the PR description:
+```bash
+# Create PR body file
+cat > /tmp/pr-body.md << 'EOF'
+## Summary
+- Brief bullet points of changes
+
+## Features Added
+- List of new features
+
+## Test Results
+- Test coverage and results
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+EOF
+```
+
+### Step 2: Create PR
+```bash
+gh pr create --title "feat: feature description" --body-file /tmp/pr-body.md
+```
+
+### Step 3: Cleanup
+```bash
+rm /tmp/pr-body.md
+```
+
 ## Workplan Format
 
 Based on existing Documentation/Plans files, use this structure:
