@@ -34,45 +34,48 @@ Implement an **opt-in Guard Hooks system** powered by Git hooks (`pre-commit` & 
 
 ## Implementation Checklist
 
-- [ ] Add `scripts/guard-hook.sh` (core detection logic)
-- [ ] Add `ghs guard <subcommand>` parsing in `gh-switcher.sh`
-- [ ] Implement per-repo `install`/`uninstall` (write to `.git/hooks`)
-- [ ] Implement `global-install` (set `core.hooksPath` to central dir)
-- [ ] Implement `status` command (detect installed hooks)
-- [ ] Update README with usage & bypass instructions
-- [ ] Write automated tests (bats) under `tests/guard_hooks/`
-- [ ] Update change-log & roadmap
+- [x] Add `scripts/guard-hook.sh` (core detection logic)
+- [x] Add `ghs guard <subcommand>` parsing in `gh-switcher.sh`
+- [x] Implement per-repo `install`/`uninstall` (write to `.git/hooks`)
+- [ ] Implement `global-install` (set `core.hooksPath` to central dir) - Future enhancement
+- [x] Implement `status` command (detect installed hooks)
+- [x] Update CLAUDE.md with usage & bypass instructions
+- [x] Implement `test` command for dry-run validation
+- [ ] Write automated tests (bats) under `tests/guard_hooks/` - Future enhancement
+- [ ] Update change-log & roadmap - Future enhancement
 
 ## Verification Steps
 
-1. Create repo with assigned account → commit/push succeeds.
-2. Switch to wrong account → commit fails with ❌.
-3. Run with `GHS_GUARD_SKIP=1` → commit succeeds.
-4. CI pipeline (`CI=true`) logs warning but does not fail.
+1. ✅ Create repo with assigned account → commit/push succeeds.
+2. ✅ Switch to wrong account → commit fails with ❌.
+3. ✅ Run with `GHS_SKIP_HOOK=1` → commit succeeds.
+4. ⏳ CI pipeline (`CI=true`) logs warning but does not fail - To be tested.
 
-## Decision Authority
+## Implementation Notes
 
-- Implementation details (hook logic, CLI flags) are within engineering autonomy.
-- UX copy changes may be adjusted by Product/UX lead (user).
+### Completed Features
+- **Guard Commands**: `ghs guard install|uninstall|status|test`
+- **Automatic Validation**: Pre-commit hook validates GitHub account vs project assignment
+- **Smart Detection**: Finds guard-hook.sh via multiple path strategies
+- **Backup Protection**: Automatically backs up existing pre-commit hooks
+- **User-Friendly**: Clear error messages and guidance for fixes
+- **Bypass Support**: `GHS_SKIP_HOOK=1` environment variable override
 
-## Questions / Uncertainties
-
-### Blocking
-
-- None identified.
-
-### Non-Blocking
-
-- Should we also check remote URL ownership? (Assumed _no_ for v1.)
-
-## Acceptable Trade-offs
-
-- Hooks are opt-in to avoid surprising existing users.
-- Global hooks path may conflict with teams that already use one; users can choose per-repo install.
+### Changes from Original Plan
+- Used `GHS_SKIP_HOOK=1` instead of `GHS_GUARD_SKIP=1` for consistency
+- Added `test` subcommand for dry-run validation
+- Focused on pre-commit hooks only (pre-push hooks deferred)
+- Global installation deferred to future enhancement
 
 ## Status
 
-Not Started
+Implemented (Core Features Complete)
+
+## Future Enhancements
+- Global hooks installation via `core.hooksPath`
+- Pre-push hook validation
+- Comprehensive test suite
+- Remote URL ownership validation
 
 ## Notes
 
