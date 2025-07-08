@@ -1623,10 +1623,16 @@ cmd_guard() {
     local project="$(basename "$PWD")"
     local force_flag=""
     
-    # Check for --force flag
-    if [[ "${2:-}" == "--force" ]]; then
-        force_flag="--force"
-    fi
+    # Check for --force flag in any position
+    shift # Remove subcommand
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            "--force")
+                force_flag="--force"
+                ;;
+        esac
+        shift
+    done
     
     case "$subcommand" in
         "install")
@@ -2017,7 +2023,8 @@ ghs() {
             fi
             ;;
         "guard")
-            cmd_guard "$2"
+            shift # Remove "guard"
+            cmd_guard "$@"
             ;;
         "help"|"-h"|"--help")
             show_help

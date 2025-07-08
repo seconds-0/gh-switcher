@@ -43,7 +43,7 @@ teardown() {
 @test "ghs guard install backs up existing hooks" {
     create_existing_precommit_hook "#!/bin/bash\necho \"Original hook\""
     
-    echo "y" | run_guard_command "install"
+    run_guard_command "install" "--force"
     assert_success
     assert_output_contains "Backed up existing hook"
     

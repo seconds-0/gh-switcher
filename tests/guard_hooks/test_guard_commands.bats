@@ -87,9 +87,9 @@ teardown() {
 @test "guard commands require git repository" {
     cd "$TEST_HOME"  # Outside git repo
     
-    run_guard_command "install"
+    run_guard_command_here "install"
     assert_output_contains "Not in a git repository"
     
-    run_guard_command "status"
+    run_guard_command_here "status"
     assert_output_contains "Not in a git repository"
 }

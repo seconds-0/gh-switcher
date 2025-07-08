@@ -72,9 +72,14 @@ create_existing_precommit_hook() {
     chmod +x "$TEST_GIT_REPO/.git/hooks/pre-commit"
 }
 
-# Run guard command and capture output
+# Run guard command and capture output (inside git repo)
 run_guard_command() {
     cd "$TEST_GIT_REPO"
+    run bash "$BATS_TEST_DIRNAME/../../gh-switcher.sh" guard "$@"
+}
+
+# Run guard command without changing directory (for testing outside git repo)
+run_guard_command_here() {
     run bash "$BATS_TEST_DIRNAME/../../gh-switcher.sh" guard "$@"
 }
 
