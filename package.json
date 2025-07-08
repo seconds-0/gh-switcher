@@ -13,7 +13,11 @@
     "ci-check": "./scripts/ci-check.sh",
     "ci-test": "./scripts/local-ci-test.sh",
     "install-global": "echo 'source $(pwd)/gh-switcher.sh' >> ~/.zshrc && echo 'Added to ~/.zshrc - restart your terminal'",
-    "uninstall-global": "sed -i.bak '/gh-switcher.sh/d' ~/.zshrc && echo 'Removed from ~/.zshrc'"
+    "uninstall-global": "sed -i.bak '/gh-switcher.sh/d' ~/.zshrc && echo 'Removed from ~/.zshrc'",
+    "guard-install": "bash gh-switcher.sh guard install",
+    "guard-uninstall": "bash gh-switcher.sh guard uninstall",
+    "install-hook": "npm run guard-install",
+    "uninstall-hook": "npm run guard-uninstall"
   },
   "keywords": [
     "github",

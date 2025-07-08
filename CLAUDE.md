@@ -22,8 +22,9 @@ npm run ci-test
 # Install globally (adds to ~/.zshrc)
 npm run install-global
 
-# Install pre-commit hook for account validation
-npm run install-hook
+# Install guard hooks for account validation  
+npm run guard-install
+# OR: ghs guard install
 ```
 
 ### Development Workflow
@@ -92,20 +93,26 @@ npm run ci-check
 - **Security**: SSH key validation, input sanitization
 - **Non-Interactive**: All commands work in scripts/automation
 
-### Pre-commit Hook (Account Validation)
-The project includes a pre-commit hook that validates GitHub account and git profile before commits to prevent wrong-account commits.
+### Guard Hooks (Account Validation)
+The project includes guard hooks that validate GitHub account and git profile before commits to prevent wrong-account commits.
 
-#### Installation
+#### Installation & Usage
 ```bash
-# Easy installation via npm script
-npm run install-hook
+# Install guard hooks for current repository
+ghs guard install
 
-# Manual installation (run from project root)
-ln -sf "$(pwd)/scripts/precommit-hook.sh" .git/hooks/pre-commit
-chmod +x .git/hooks/pre-commit
+# Check guard status and validation state
+ghs guard status  
 
-# Uninstall hook
-npm run uninstall-hook
+# Test validation without installing
+ghs guard test
+
+# Remove guard hooks
+ghs guard uninstall
+
+# Alternative npm scripts (backward compatibility)
+npm run guard-install    # Same as: ghs guard install
+npm run guard-uninstall  # Same as: ghs guard uninstall
 ```
 
 #### What it validates
@@ -113,21 +120,31 @@ npm run uninstall-hook
 - **Git config**: Ensures git name and email are configured
 - **Profile matching**: Warns if git config doesn't match user profile
 
-#### Usage
+#### Normal Usage
 ```bash
-# Normal commit (with validation)
-git commit -m "your message"
+# Setup protection for a project
+ghs assign 2              # Assign user to project
+ghs guard install         # Install validation hooks
+git commit -m "message"   # Automatic validation
 
+# Check status anytime
+ghs guard status          # See protection status
+ghs                       # Dashboard also shows guard status
+```
+
+#### Override when needed
+```bash
 # Bypass validation (not recommended)
 GHS_SKIP_HOOK=1 git commit -m "your message"
 ```
 
-#### Hook behavior
+#### Guard Hook Behavior
 - **Fails commit** if GitHub account doesn't match project assignment
 - **Fails commit** if git config is incomplete (missing name/email)
 - **Warns but allows** if git config doesn't match profile
 - **Skips validation** if GitHub CLI not authenticated
 - **Provides guidance** on how to fix issues
+- **Backs up existing hooks** during installation
 
 ### Code Patterns
 - Follow existing code style and conventions

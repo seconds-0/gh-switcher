@@ -1066,6 +1066,12 @@ show_help() {
     echo "PROJECT & STATUS:"
     echo "  ghs status                 Show detailed current status"
     echo "  ghs list                   List all configured projects"
+    echo ""
+    echo "PROTECTION:"
+    echo "  ghs guard install          Install commit validation hooks"
+    echo "  ghs guard uninstall        Remove commit validation hooks"  
+    echo "  ghs guard status           Show guard status and validation state"
+    echo "  ghs guard test             Test validation without installing"
 }
 
 # Helper function to run profile validation check for all users
@@ -1611,6 +1617,222 @@ cmd_status() {
     fi
 }
 
+# Guard command implementation
+cmd_guard() {
+    local subcommand="${1:-}"
+    local project="$(basename "$PWD")"
+    
+    case "$subcommand" in
+        "install")
+            cmd_guard_install
+            ;;
+        "uninstall")
+            cmd_guard_uninstall
+            ;;
+        "status")
+            cmd_guard_status "$project"
+            ;;
+        "test")
+            cmd_guard_test "$project"
+            ;;
+        *)
+            echo "❌ Usage: ghs guard <subcommand>"
+            echo ""
+            echo "Available subcommands:"
+            echo "  install     Install commit validation hooks"
+            echo "  uninstall   Remove commit validation hooks"
+            echo "  status      Show guard status and validation state"
+            echo "  test        Test validation without installing"
+            echo ""
+            echo "Examples:"
+            echo "  ghs guard install        # Enable protection for this repo"
+            echo "  ghs guard status         # Check if protection is active"
+            echo "  ghs guard test           # Dry run validation"
+            return 1
+            ;;
+    esac
+}
+
+cmd_guard_install() {
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "❌ Not in a git repository"
+        echo "   Navigate to a git repository to install guard hooks"
+        return 1
+    fi
+
+    local hook_script="$(git rev-parse --show-toplevel)/scripts/guard-hook.sh"
+    local hook_target="$(git rev-parse --show-toplevel)/.git/hooks/pre-commit"
+    
+    if [[ ! -f "$hook_script" ]]; then
+        echo "❌ Guard hook script not found at $hook_script"
+        echo "   Make sure gh-switcher is properly installed"
+        return 1
+    fi
+    
+    # Check if hook already exists
+    if [[ -f "$hook_target" ]]; then
+        if [[ -L "$hook_target" ]] && [[ "$(readlink "$hook_target")" == *"guard-hook.sh" ]]; then
+            echo "✅ Guard hooks already installed"
+            return 0
+        else
+            echo "⚠️  Existing pre-commit hook found"
+            echo "   Backup and replace? (y/N):"
+            read -r response
+            if [[ "$response" != "y" && "$response" != "Y" ]]; then
+                echo "❌ Installation cancelled"
+                return 1
+            fi
+            mv "$hook_target" "${hook_target}.backup.$(date +%s)"
+            echo "💾 Backed up existing hook"
+        fi
+    fi
+    
+    # Install the hook
+    ln -sf "$hook_script" "$hook_target"
+    chmod +x "$hook_target"
+    
+    echo "✅ Guard hooks installed successfully"
+    echo "   Commits will now be validated for account mismatches"
+    echo ""
+    echo "💡 To bypass validation when needed:"
+    echo "   GHS_SKIP_HOOK=1 git commit -m \"message\""
+}
+
+cmd_guard_uninstall() {
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "❌ Not in a git repository"
+        return 1
+    fi
+
+    local hook_target="$(git rev-parse --show-toplevel)/.git/hooks/pre-commit"
+    
+    if [[ ! -f "$hook_target" ]]; then
+        echo "✅ No guard hooks to remove"
+        return 0
+    fi
+    
+    if [[ -L "$hook_target" ]] && [[ "$(readlink "$hook_target")" == *"guard-hook.sh" ]]; then
+        rm -f "$hook_target"
+        echo "✅ Guard hooks removed"
+        
+        # Check for backup
+        local backup_file=$(find "$(dirname "$hook_target")" -name "pre-commit.backup.*" -type f 2>/dev/null | head -1)
+        if [[ -n "$backup_file" ]]; then
+            echo "💡 Previous hook backup found: $backup_file"
+            echo "   Restore it? (y/N):"
+            read -r response
+            if [[ "$response" == "y" || "$response" == "Y" ]]; then
+                mv "$backup_file" "$hook_target"
+                echo "✅ Previous hook restored"
+            fi
+        fi
+    else
+        echo "⚠️  Pre-commit hook exists but is not a guard hook"
+        echo "   Not removing unknown hook"
+        return 1
+    fi
+}
+
+cmd_guard_status() {
+    local project="$1"
+    
+    echo "🛡️  Guard Status for $project"
+    echo ""
+    
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "❌ Not in a git repository"
+        return 1
+    fi
+
+    local hook_target="$(git rev-parse --show-toplevel)/.git/hooks/pre-commit"
+    
+    # Check hook installation
+    if [[ -f "$hook_target" ]]; then
+        if [[ -L "$hook_target" ]] && [[ "$(readlink "$hook_target")" == *"guard-hook.sh" ]]; then
+            echo "✅ Guard hooks installed and active"
+        else
+            echo "⚠️  Different pre-commit hook installed"
+            echo "   Run 'ghs guard install' to enable gh-switcher protection"
+        fi
+    else
+        echo "❌ No guard hooks installed"
+        echo "   Run 'ghs guard install' to enable protection"
+        echo ""
+        return 0
+    fi
+    
+    echo ""
+    echo "🔍 Current validation state:"
+    cmd_guard_test "$project"
+}
+
+cmd_guard_test() {
+    local project="$1"
+    
+    # Run the validation logic from guard-hook.sh without installing
+    if ! check_gh_auth; then
+        echo "⚠️  GitHub CLI not authenticated"
+        echo "   Validation would be skipped"
+        return 0
+    fi
+
+    local current_user=$(get_current_github_user)
+    if [[ -z "$current_user" ]]; then
+        echo "⚠️  Could not determine current GitHub user"
+        echo "   Validation would be skipped"
+        return 0
+    fi
+
+    echo "👤 Current GitHub user: $current_user"
+
+    # Check project assignment
+    local project_user=""
+    if [[ -f "$GH_PROJECT_CONFIG" ]]; then
+        project_user=$(grep "^$project=" "$GH_PROJECT_CONFIG" 2>/dev/null | cut -d'=' -f2 || echo "")
+    fi
+
+    if [[ -n "$project_user" ]]; then
+        echo "🔗 Project assigned to: $project_user"
+        
+        if [[ "$current_user" != "$project_user" ]]; then
+            echo "❌ Account mismatch detected!"
+            echo "   Commits would be blocked"
+            return 1
+        else
+            echo "✅ Account matches project assignment"
+        fi
+    else
+        echo "💡 No project assignment found"
+        echo "   Validation would show warning but allow commit"
+    fi
+
+    # Check git config
+    local git_config_output=$(detect_git_config "local" 2>/dev/null)
+    local git_name=$(echo "$git_config_output" | grep "^name:" | cut -d':' -f2- || echo "")
+    local git_email=$(echo "$git_config_output" | grep "^email:" | cut -d':' -f2- || echo "")
+
+    # If no local config, check global
+    if [[ -z "$git_name" || -z "$git_email" ]]; then
+        git_config_output=$(detect_git_config "global" 2>/dev/null)
+        git_name=$(echo "$git_config_output" | grep "^name:" | cut -d':' -f2- || echo "")
+        git_email=$(echo "$git_config_output" | grep "^email:" | cut -d':' -f2- || echo "")
+    fi
+
+    echo "📧 Git config: $git_name <$git_email>"
+
+    if [[ -z "$git_name" || -z "$git_email" ]]; then
+        echo "❌ Git config incomplete!"
+        echo "   Commits would be blocked"
+        return 1
+    else
+        echo "✅ Git config is complete"
+    fi
+
+    echo ""
+    echo "🎯 Overall status: Validation would pass"
+    return 0
+}
+
 # Simple GitHub project switcher function
 ghs() {
     local cmd="${1:-dashboard}"
@@ -1754,6 +1976,9 @@ ghs() {
             else
                 echo "⚠️  Shell profile $shell_profile not found"
             fi
+            ;;
+        "guard")
+            cmd_guard "$2"
             ;;
         "help"|"-h"|"--help")
             show_help
