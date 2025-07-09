@@ -165,3 +165,48 @@ cleanup_test_ssh_environment() {
     restore_ssh_command
     unset TEST_ED25519_KEY TEST_RSA_KEY TEST_INVALID_KEY TEST_MALFORMED_KEY TEST_WRONG_PERMS_KEY
 }
+
+# Create a fake SSH key with specific name and permissions (for simplified testing)
+create_fake_ssh_key() {
+    local key_name="$1"
+    local permissions="${2:-600}"
+    local key_path="$TEST_HOME/.ssh/$key_name"
+    
+    mkdir -p "$TEST_HOME/.ssh"
+    
+    # Create fake SSH key with proper header
+    cat > "$key_path" << 'EOF'
+-----BEGIN PRIVATE KEY-----
+fake-key-content-for-testing
+-----END PRIVATE KEY-----
+EOF
+    
+    chmod "$permissions" "$key_path"
+    echo "$key_path"
+}
+
+# Assert that key permissions were fixed
+assert_key_permissions_fixed() {
+    local key_path="$1"
+    local expected_perms="${2:-600}"
+    
+    local actual_perms
+    actual_perms=$(stat -c %a "$key_path" 2>/dev/null || stat -f %Lp "$key_path" 2>/dev/null)
+    
+    [[ "$actual_perms" == "$expected_perms" ]] || {
+        echo "Expected key permissions $expected_perms, got $actual_perms for $key_path"
+        return 1
+    }
+}
+
+# Create test scenario with multiple SSH keys for detection testing
+create_multi_key_scenario() {
+    local username="$1"
+    mkdir -p "$TEST_HOME/.ssh"
+    
+    # Create keys matching different patterns
+    create_fake_ssh_key "id_ed25519_${username}"
+    create_fake_ssh_key "id_rsa_${username}"
+    create_fake_ssh_key "id_ed25519"
+    create_fake_ssh_key "id_rsa"
+}

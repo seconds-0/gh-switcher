@@ -19,11 +19,21 @@ setup_test_environment() {
     mkdir -p "$TEST_HOME"
     
     # Source the gh-switcher script for function access
-    source "$BATS_TEST_DIRNAME/../gh-switcher.sh"
+    # Determine correct path based on test location
+    if [[ "$BATS_TEST_DIRNAME" == */tests/unit || "$BATS_TEST_DIRNAME" == */tests/integration ]]; then
+        # Tests in subdirectories (unit/, integration/)
+        source "$BATS_TEST_DIRNAME/../../gh-switcher.sh"
+    else
+        # Tests in root tests/ directory
+        source "$BATS_TEST_DIRNAME/../gh-switcher.sh"
+    fi
 }
 
 # Clean up test environment
 cleanup_test_environment() {
+    # Clean up mocks first
+    cleanup_all_mocks
+    
     if [[ -n "$TEST_HOME" && -d "$TEST_HOME" ]]; then
         rm -rf "$TEST_HOME"
     fi
@@ -219,4 +229,91 @@ debug_test_state() {
     fi
     
     echo "========================"
+}
+
+# Mock creation helpers for consistent testing
+
+# Create a mock GitHub CLI command with authentication and API support
+create_mock_gh() {
+    local username="${1:-test-user}"
+    local authenticated="${2:-true}"
+    
+    cat > "$TEST_HOME/gh" << EOF
+#!/bin/bash
+case "\$1" in
+    "auth")
+        case "\$2" in
+            "status")
+                if [[ "$authenticated" == "true" ]]; then
+                    exit 0  # Authenticated
+                else
+                    exit 1  # Not authenticated
+                fi
+                ;;
+        esac
+        ;;
+    "api")
+        case "\$2" in
+            "user")
+                if [[ "$authenticated" == "true" ]]; then
+                    # Handle --jq parameter for JSON parsing
+                    if [[ "\$3" == "--jq" && "\$4" == ".login" ]]; then
+                        echo "$username"
+                    else
+                        echo '{"login": "$username"}'
+                    fi
+                else
+                    echo "To get started with GitHub CLI, please run: gh auth login"
+                    exit 1
+                fi
+                ;;
+        esac
+        ;;
+esac
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+}
+
+# Remove GitHub CLI mock
+remove_mock_gh() {
+    rm -f "$TEST_HOME/gh"
+    # Remove mock from PATH
+    export PATH=$(echo "$PATH" | sed "s|$TEST_HOME:||g")
+}
+
+# Create a mock SSH command for testing authentication
+create_mock_ssh() {
+    local username="${1:-test-user}"
+    local auth_success="${2:-true}"
+    
+    cat > "$TEST_HOME/ssh" << EOF
+#!/bin/bash
+if [[ "\$@" == *"github.com"* ]]; then
+    if [[ "$auth_success" == "true" ]]; then
+        echo "Hi $username! You've successfully authenticated, but GitHub does not provide shell access."
+        exit 1  # GitHub SSH returns 1 for successful auth
+    else
+        echo "Permission denied (publickey)."
+        exit 255  # SSH connection failure
+    fi
+else
+    # Default SSH behavior for other hosts
+    exec /usr/bin/ssh "\$@"
+fi
+EOF
+    chmod +x "$TEST_HOME/ssh"
+    export PATH="$TEST_HOME:$PATH"
+}
+
+# Remove SSH mock
+remove_mock_ssh() {
+    rm -f "$TEST_HOME/ssh"
+    export PATH=$(echo "$PATH" | sed "s|$TEST_HOME:||g")
+}
+
+# Clean up all mocks
+cleanup_all_mocks() {
+    remove_mock_gh
+    remove_mock_ssh
 }

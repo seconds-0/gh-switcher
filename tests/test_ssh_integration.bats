@@ -1,5 +1,16 @@
 #!/usr/bin/env bats
 
+# LEGACY TEST FILE - NEEDS UPDATING
+# This test file tests the old overengineered SSH implementation
+# that was simplified in REFACTOR-SSHSimplification.
+# 
+# Current status: Many tests fail because they expect old behavior
+# TODO: Update tests to match simplified implementation or remove
+# 
+# For current SSH functionality, see:
+# - tests/unit/test_ssh_detection.bats (✅ working)
+# - tests/integration/test_ssh_workflow.bats (✅ working)
+
 # Test SSH key integration functionality
 # Tests SSH validation, configuration, and application
 

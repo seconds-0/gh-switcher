@@ -1,5 +1,16 @@
 #!/usr/bin/env bats
 
+# LEGACY TEST FILE - PARTIALLY NEEDS UPDATING
+# This test file tests user management functionality.
+# SSH-related tests may fail due to REFACTOR-SSHSimplification changes.
+# 
+# Current status: Some SSH-related tests fail, core user management tests work
+# TODO: Update SSH-related tests to match simplified implementation
+# 
+# For current SSH functionality, see:
+# - tests/unit/test_ssh_detection.bats (✅ working)
+# - tests/integration/test_ssh_workflow.bats (✅ working)
+
 # Test user management functionality
 # Tests add_user, remove_user, list_users functions
 

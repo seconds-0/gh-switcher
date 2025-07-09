@@ -129,6 +129,7 @@ GH_USER_PROFILES="$HOME/.gh-user-profiles"
 add_user() {
     local username="$1"
     local ssh_key_path=""
+    local no_ssh=false
     
     # Parse arguments for SSH key option
     shift  # Remove username from args
@@ -138,20 +139,24 @@ add_user() {
                 ssh_key_path="$2"
                 shift 2
                 ;;
+            --no-ssh)
+                no_ssh=true
+                shift
+                ;;
             *)
                 echo "❌ Unknown option: $1"
-                echo "   Usage: ghs add-user <username> [--ssh-key <path>]"
+                echo "   Usage: ghs add-user <username> [--ssh-key ~/.ssh/id_rsa] [--no-ssh]"
                 return 1
                 ;;
         esac
     done
     
     if [[ -z "$username" ]]; then
-        echo "❌ Usage: ghs add-user <username> [--ssh-key <path>]"
+        echo "❌ Usage: ghs add-user <username> [--ssh-key ~/.ssh/id_rsa] [--no-ssh]"
         echo "   Examples:"
         echo "     ghs add-user work-account --ssh-key ~/.ssh/id_rsa_work"
         echo "     ghs add-user personal"
-        echo "     ghs add-user current"
+        echo "     ghs add-user current --no-ssh"
         return 1
     fi
     
@@ -180,15 +185,48 @@ add_user() {
     fi
     
     # Check if user already exists
-    # LIBRARY NOTE: Would need to ensure config directory exists first
-    # mkdir -p "$(dirname "$GH_USERS_CONFIG")" 2>/dev/null
     if [[ -f "$GH_USERS_CONFIG" ]] && grep -q "^$username$" "$GH_USERS_CONFIG" 2>/dev/null; then
         echo "⚠️  User $username already exists in the list"
         return 0
     fi
     
+    # Smart SSH key detection if not provided (unless --no-ssh specified)
+    if [[ -z "$ssh_key_path" && "$no_ssh" == "false" ]]; then
+        local keys=($(detect_ssh_keys "$username"))
+        
+        case ${#keys[@]} in
+            0)
+                echo "📝 No SSH keys found, using HTTPS"
+                ;;
+            1)
+                ssh_key_path="${keys[0]}"
+                fix_ssh_permissions "$ssh_key_path"
+                echo "🔍 Found SSH key: $ssh_key_path"
+                ;;
+            *)
+                echo "🔍 Found multiple SSH keys:"
+                printf "  %s\n" "${keys[@]}"
+                echo ""
+                echo "Specify which one to use:"
+                for key in "${keys[@]}"; do
+                    echo "  ghs add-user $username --ssh-key $key"
+                done
+                return 1
+                ;;
+        esac
+    elif [[ "$no_ssh" == "true" ]]; then
+        echo "📝 Using HTTPS mode (--no-ssh specified)"
+    fi
+    
+    # Validate SSH key if provided before adding user
+    if [[ -n "$ssh_key_path" ]]; then
+        echo "🔍 Validating SSH key..."
+        if ! validate_ssh_key "$ssh_key_path"; then
+            return 1  # Fail when explicit SSH key is invalid
+        fi
+    fi
+    
     # Add user to the list
-    # LIBRARY NOTE: Would need atomic write operation with proper error handling
     echo "$username" >> "$GH_USERS_CONFIG"
     echo "✅ Added $username to user list"
     
@@ -217,7 +255,7 @@ add_user() {
 list_users() {
     if [[ ! -f "$GH_USERS_CONFIG" || ! -s "$GH_USERS_CONFIG" ]]; then
         echo "📋 No users configured yet"
-        echo "   Use 'ghs add-user <username> [--ssh-key <path>]' to add users"
+        echo "   Use 'ghs add-user work-account --ssh-key ~/.ssh/id_rsa' to add users"
         return 0
     fi
     
@@ -277,7 +315,7 @@ get_user_by_id() {
     fi
     
     if [[ ! -f "$GH_USERS_CONFIG" || ! -s "$GH_USERS_CONFIG" ]]; then
-        echo "❌ No users configured. Use 'ghs add-user <username>' first."
+        echo "❌ No users configured. Use 'ghs add-user work-account' first."
         return 1
     fi
     
@@ -354,108 +392,51 @@ detect_git_config() {
 # - Test with non-readable files (permission denied)
 validate_ssh_key() {
     local ssh_key_path="$1"
-    local fix_permissions="${2:-true}"  # Whether to auto-fix permissions
-    
-    if [[ -z "$ssh_key_path" ]]; then
-        return 0  # Empty path is valid (means no SSH key)
-    fi
-    
-    # Expand ~ to home directory
+    [[ -z "$ssh_key_path" ]] && return 0  # Empty is valid
     ssh_key_path="${ssh_key_path/#~/$HOME}"
     
-    # Security: Prevent directory traversal attacks
-    if [[ "$ssh_key_path" == *".."* ]]; then
-        echo "❌ Invalid SSH key path (directory traversal detected)"
-        return 1
-    fi
-    
-    # Check if file exists
     if [[ ! -f "$ssh_key_path" ]]; then
         echo "❌ SSH key not found: $ssh_key_path"
-        echo "💡 Options:"
-        echo "   1. Create SSH key: ssh-keygen -t ed25519 -f $ssh_key_path"
-        echo "   2. Add user without SSH key (will use HTTPS)"
         return 1
     fi
+}
+
+# Helper function to detect SSH keys for a username
+detect_ssh_keys() {
+    local username="$1"
+    local ssh_dir="$HOME/.ssh"
     
-    # Check if file is readable
-    if [[ ! -r "$ssh_key_path" ]]; then
-        echo "❌ SSH key not readable: $ssh_key_path"
-        return 1
-    fi
+    # Return early if .ssh directory doesn't exist
+    [[ ! -d "$ssh_dir" ]] && return 0
     
-    # Check file permissions (should be 600)
-    local perms=$(stat -c %a "$ssh_key_path" 2>/dev/null || stat -f %Lp "$ssh_key_path" 2>/dev/null)
-    if [[ "$perms" != "600" ]]; then
-        if [[ "$fix_permissions" == "true" ]]; then
-            echo "⚠️  SSH key has incorrect permissions ($perms)"
-            echo "🔧 Fixing permissions to 600..."
-            if chmod 600 "$ssh_key_path" 2>/dev/null; then
-                echo "✅ Set permissions to 600"
-            else
-                echo "❌ Failed to fix permissions"
-                return 1
-            fi
-        else
-            echo "⚠️  SSH key has incorrect permissions ($perms), should be 600"
-            return 1
-        fi
-    fi
+    # Find keys matching patterns (no ranking needed - show all options)
+    find "$ssh_dir" -type f -name "id_*${username}*" 2>/dev/null
+    find "$ssh_dir" -type f -name "${username}*" 2>/dev/null  
+    find "$ssh_dir" -type f -name "id_*github*" 2>/dev/null
+    find "$ssh_dir" -type f \( -name "id_ed25519" -o -name "id_rsa" \) 2>/dev/null
     
-    # Basic file format validation (check if it looks like a private key)
-    if ! grep -q "BEGIN.*PRIVATE KEY" "$ssh_key_path" 2>/dev/null; then
-        echo "⚠️  SSH key file doesn't appear to be a private key"
-        echo "   Make sure you're using the private key (not .pub file)"
-        return 1
-    fi
-    
+    # Always return success
     return 0
 }
 
-# Helper function to test SSH authentication with GitHub
-#
-# TEST NOTES:
-# - Test with properly configured SSH key (added to GitHub)
-# - Test with SSH key not added to GitHub
-# - Test with invalid SSH key format
-# - Test with network connectivity issues
-# - Test with different GitHub endpoints (github.com, enterprise)
-test_ssh_auth() {
+# Helper function to fix SSH key permissions
+fix_ssh_permissions() {
     local ssh_key_path="$1"
     
-    if [[ -z "$ssh_key_path" ]]; then
-        return 1
-    fi
+    # Skip if not a regular file (handles symlinks, devices, etc.)
+    [[ -f "$ssh_key_path" && ! -L "$ssh_key_path" ]] || return 0
     
-    # Expand ~ to home directory
-    ssh_key_path="${ssh_key_path/#~/$HOME}"
+    local current_perms=$(stat -c %a "$ssh_key_path" 2>/dev/null || stat -f %Lp "$ssh_key_path" 2>/dev/null)
     
-    echo "🔐 Testing GitHub authentication with SSH key..."
-    
-    # Test SSH connection to GitHub with specific key
-    local ssh_output
-    ssh_output=$(ssh -i "$ssh_key_path" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 -T git@github.com 2>&1)
-    local ssh_result=$?
-    
-    # GitHub SSH returns 1 for successful authentication, 255 for failures
-    if [[ $ssh_result -eq 1 ]]; then
-        # Extract username from SSH output
-        local github_username=$(echo "$ssh_output" | grep -o "Hi [^!]*" | cut -d' ' -f2)
-        if [[ -n "$github_username" ]]; then
-            echo "✅ SSH key authenticated as: $github_username"
-            echo "$github_username"  # Return username for caller
-            return 0
+    if [[ "$current_perms" != "600" ]]; then
+        if chmod 600 "$ssh_key_path" 2>/dev/null; then
+            echo "🔧 Fixed SSH key permissions ($current_perms → 600)"
         else
-            echo "✅ SSH key authenticated (username detection failed)"
-            return 0
+            echo "⚠️  Could not fix SSH key permissions"
         fi
-    else
-        echo "❌ SSH key authentication failed"
-        echo "💡 Ensure key is added to GitHub: https://github.com/settings/keys"
-        echo "   SSH output: $ssh_output"
-        return 1
     fi
 }
+
 
 # Helper function to apply SSH configuration to git
 #
@@ -467,55 +448,18 @@ test_ssh_auth() {
 # - Test with malformed SSH key paths
 apply_ssh_config() {
     local ssh_key_path="$1"
-    local scope="${2:-local}"  # 'local' or 'global'
+    local scope="${2:-local}"
     
-    # Check git availability
-    if ! check_git_availability; then
-        echo "❌ Git is not available or not working"
-        return 1
-    fi
+    local git_flags="--local"
+    [[ "$scope" == "global" ]] && git_flags="--global"
     
-    # Validate scope
-    if [[ "$scope" != "local" && "$scope" != "global" ]]; then
-        echo "❌ Invalid scope: $scope (must be 'local' or 'global')"
-        return 1
-    fi
-    
-    local git_flags=""
-    if [[ "$scope" == "global" ]]; then
-        git_flags="--global"
-    else
-        git_flags="--local"
-        
-        # Check if we're in a git repository for local config
-        if ! git rev-parse --git-dir >/dev/null 2>&1; then
-            echo "❌ Not in a git repository (required for local config)"
-            return 1
-        fi
-    fi
-    
-    # Remove SSH configuration if no key provided
     if [[ -z "$ssh_key_path" ]]; then
-        if git config $git_flags --unset core.sshCommand 2>/dev/null; then
-            echo "✅ Removed SSH configuration (will use HTTPS or default SSH)"
-        fi
+        git config $git_flags --unset core.sshCommand 2>/dev/null || true
         return 0
     fi
     
-    # Expand ~ to home directory
     ssh_key_path="${ssh_key_path/#~/$HOME}"
-    
-    # Security: Proper quoting to prevent command injection
-    local ssh_command="ssh -i '$ssh_key_path' -o IdentitiesOnly=yes"
-    
-    # Apply SSH configuration
-    if git config $git_flags core.sshCommand "$ssh_command" 2>/dev/null; then
-        echo "🔐 Configured SSH key: $ssh_key_path"
-        return 0
-    else
-        echo "❌ Failed to configure SSH key"
-        return 1
-    fi
+    git config $git_flags core.sshCommand "ssh -i '$ssh_key_path' -o IdentitiesOnly=yes"
 }
 
 # Helper function to validate input for profile creation
@@ -732,30 +676,7 @@ create_user_profile() {
         email="${username}@users.noreply.github.com"
     fi
     
-    # Test SSH authentication if SSH key provided
-    if [[ -n "$ssh_key_path" ]]; then
-        echo "🔍 Validating SSH key..."
-        if validate_ssh_key "$ssh_key_path"; then
-            # Test authentication and get username
-            local auth_username=$(test_ssh_auth "$ssh_key_path")
-            if [[ $? -eq 0 && -n "$auth_username" ]]; then
-                # SSH authentication successful
-                echo "✅ SSH key verified for GitHub user: $auth_username"
-                
-                # Warn if SSH username doesn't match provided username
-                if [[ "$auth_username" != "$username" ]]; then
-                    echo "⚠️  Warning: SSH key belongs to '$auth_username' but you specified '$username'"
-                    echo "   Continuing with '$username' as specified..."
-                fi
-            else
-                echo "⚠️  SSH authentication failed, but continuing with profile creation"
-                echo "   You can add the SSH key to GitHub later: https://github.com/settings/keys"
-            fi
-        else
-            echo "⚠️  SSH key validation failed, continuing without SSH key"
-            ssh_key_path=""  # Clear the SSH key path so profile is created without it
-        fi
-    fi
+    # SSH key validation is now done in add_user before this function is called
     
     # Write the profile
     if write_profile_entry "$username" "$name" "$email" "$ssh_key_path"; then
@@ -1506,7 +1427,7 @@ ghs() {
             echo ""
             echo "SETUP:"
             echo "  ghs add-user <username>                    Add a user (HTTPS mode)"
-            echo "  ghs add-user <username> --ssh-key <path>   Add a user with SSH key"
+            echo "  ghs add-user <username> --ssh-key ~/.ssh/id_rsa   Add a user with SSH key"
             echo "  ghs add-user current                       Add currently authenticated user"
             echo ""
             echo "DAILY WORKFLOW:"
@@ -1524,11 +1445,6 @@ ghs() {
             echo "  ghs status                 Show detailed current status"
             echo "  ghs list                   List all configured projects"
             echo ""
-            echo "SSH KEY FEATURES:"
-            echo "  • Automatic SSH key validation and permission fixing"
-            echo "  • GitHub authentication testing during setup"
-            echo "  • Per-profile SSH configuration (no manual ~/.ssh/config editing)"
-            echo "  • Seamless switching between SSH and HTTPS authentication"
             ;;
             
         *)
