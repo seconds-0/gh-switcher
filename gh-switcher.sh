@@ -175,7 +175,7 @@ _validate_no_pipes() {
         echo "❌ Pipes (|) not allowed in $field_name" >&2
         echo "   Pipes are used as field separators in profile storage" >&2
         echo "   If you need pipes in your data, please open an issue:" >&2
-        echo "   https://github.com/anthropics/gh-switcher/issues" >&2
+        echo "   https://github.com/seconds-0/gh-switcher/issues" >&2
         return 1
     fi
     return 0
@@ -224,7 +224,10 @@ validate_ssh_key() {
         if [[ "$fix_perms" == "true" ]]; then
             echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
             echo "   Set permissions to 600" >&2
-            chmod 600 "$key_path"
+            if ! chmod 600 "$key_path"; then
+                echo "❌ Failed to fix SSH key permissions" >&2
+                return 1
+            fi
         else
             echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
             echo "   Set permissions to 600 with: chmod 600 $key_path" >&2
@@ -404,6 +407,13 @@ profile_get() {
     [[ -n "$profile_line" ]] || return 1
     
     # Parse v3 profile line: username|v3|name|email|ssh_key
+    local field_count
+    field_count=$(echo "$profile_line" | tr '|' '\n' | wc -l)
+    if [[ "$field_count" -ne 5 ]]; then
+        echo "❌ Invalid profile format for $username" >&2
+        return 1
+    fi
+    
     local name email ssh_key
     IFS='|' read -r _ _ name email ssh_key <<< "$profile_line"
     
@@ -471,13 +481,24 @@ project_assign() {
     validate_username "$username" || return 1
     user_exists "$username" || return 1
     
-    # Remove existing assignment and add new one
+    # Remove existing assignment and add new one (atomic operation)
+    local temp_file
+    temp_file=$(mktemp "${GH_PROJECT_CONFIG}.XXXXXX") || return 1
+    
+    # Ensure cleanup on any error
+    trap "rm -f '$temp_file' 2>/dev/null" EXIT
+    
+    # Copy all assignments except the one being updated
     if [[ -f "$GH_PROJECT_CONFIG" ]]; then
-        grep -v "^$project=" "$GH_PROJECT_CONFIG" > "${GH_PROJECT_CONFIG}.tmp" || true
-        mv "${GH_PROJECT_CONFIG}.tmp" "$GH_PROJECT_CONFIG"
+        grep -v "^$project=" "$GH_PROJECT_CONFIG" > "$temp_file" || true
     fi
     
-    echo "$project=$username" >> "$GH_PROJECT_CONFIG"
+    # Add new assignment
+    echo "$project=$username" >> "$temp_file" || { trap - EXIT; rm -f "$temp_file"; return 1; }
+    
+    # Atomic replace
+    mv -f "$temp_file" "$GH_PROJECT_CONFIG"
+    trap - EXIT
 }
 
 # Get assigned user for project
@@ -506,6 +527,7 @@ ssh_apply_config() {
     [[ "$scope" == "global" ]] && git_flags="--global"
     
     if [[ "$scope" == "local" ]] && ! git rev-parse --git-dir >/dev/null 2>&1; then
+        echo "❌ Not in a git repository (required for local scope)" >&2
         return 1
     fi
     
@@ -535,6 +557,7 @@ git_set_config() {
     [[ "$scope" == "global" ]] && git_flags="--global"
     
     if [[ "$scope" == "local" ]] && ! git rev-parse --git-dir >/dev/null 2>&1; then
+        echo "❌ Not in a git repository (required for local scope)" >&2
         return 1
     fi
     
