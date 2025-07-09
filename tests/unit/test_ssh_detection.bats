@@ -151,3 +151,21 @@ teardown() {
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
+
+@test "detect_ssh_keys excludes public key files" {
+    # Create both private and public keys
+    mkdir -p "$TEST_HOME/.ssh"
+    echo "private key" > "$TEST_HOME/.ssh/id_ed25519_test"
+    echo "public key" > "$TEST_HOME/.ssh/id_ed25519_test.pub"
+    echo "private key" > "$TEST_HOME/.ssh/id_rsa_test"
+    echo "public key" > "$TEST_HOME/.ssh/id_rsa_test.pub"
+    
+    run detect_ssh_keys "test"
+    
+    [ "$status" -eq 0 ]
+    # Should find both private keys
+    [[ "$output" == *"id_ed25519_test"* ]]
+    [[ "$output" == *"id_rsa_test"* ]]
+    # Should NOT find public keys
+    [[ "$output" != *".pub"* ]]
+}
