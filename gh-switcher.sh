@@ -410,10 +410,11 @@ detect_ssh_keys() {
     [[ ! -d "$ssh_dir" ]] && return 0
     
     # Find keys matching patterns (no ranking needed - show all options)
-    find "$ssh_dir" -type f -name "id_*${username}*" 2>/dev/null
-    find "$ssh_dir" -type f -name "${username}*" 2>/dev/null  
-    find "$ssh_dir" -type f -name "id_*github*" 2>/dev/null
-    find "$ssh_dir" -type f \( -name "id_ed25519" -o -name "id_rsa" \) 2>/dev/null
+    # Exclude .pub files to only find private keys
+    find "$ssh_dir" -type f -name "id_*${username}*" ! -name "*.pub" 2>/dev/null
+    find "$ssh_dir" -type f -name "${username}*" ! -name "*.pub" 2>/dev/null  
+    find "$ssh_dir" -type f -name "id_*github*" ! -name "*.pub" 2>/dev/null
+    find "$ssh_dir" -type f \( -name "id_ed25519" -o -name "id_rsa" \) ! -name "*.pub" 2>/dev/null
     
     # Always return success
     return 0

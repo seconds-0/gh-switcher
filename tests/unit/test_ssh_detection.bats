@@ -110,7 +110,7 @@ teardown() {
     run fix_ssh_permissions "$key_path"
     
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Could not fix SSH key permissions"* ]]
+    [[ "$output" == *"⚠️  Could not fix SSH key permissions"* ]]
     
     # Restore directory permissions for cleanup
     chmod 755 "$(dirname "$key_path")"
