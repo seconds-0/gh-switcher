@@ -6,6 +6,9 @@
 setup_guard_test_environment() {
     setup_test_environment
     
+    # Set up ghs command FIRST before anything else
+    setup_hook_test_environment
+    
     # Create isolated git repository for hook testing
     export TEST_GIT_REPO="$TEST_HOME/test-repo"
     mkdir -p "$TEST_GIT_REPO"
@@ -20,9 +23,11 @@ setup_guard_test_environment() {
     git add README.md >/dev/null 2>&1
     git commit -m "Initial commit" >/dev/null 2>&1
     
-    # Ensure guard-hook.sh script is available for testing
-    export TEST_GUARD_SCRIPT="$TEST_HOME/guard-hook.sh"
-    cp "$BATS_TEST_DIRNAME/../../scripts/guard-hook.sh" "$TEST_GUARD_SCRIPT"
+    # Ensure any old hooks are removed
+    rm -f "$TEST_GIT_REPO/.git/hooks/pre-commit"
+    
+    # Guard functionality is integrated into main script
+    export TEST_GUARD_SCRIPT="$BATS_TEST_DIRNAME/../../gh-switcher.sh"
 }
 
 # Cleanup guard test environment
@@ -32,7 +37,7 @@ cleanup_guard_test_environment() {
 
 # Create a mock GitHub CLI that returns specific user
 setup_mock_gh_user() {
-    local username="$1"
+    local username="${1:-}"
     
     if [[ -z "$username" ]]; then
         # Mock unauthenticated state
@@ -46,7 +51,7 @@ setup_mock_gh_user() {
 if [[ "\$1 \$2" == "auth status" ]]; then
     [[ -z "\${GH_MOCK_UNAUTHENTICATED:-}" ]] || exit 1
     exit 0
-elif [[ "\$1 \$2 \$3" == "api user --jq" ]]; then
+elif [[ "\$1 \$2 \$3 \$4" == "api user -q .login" ]]; then
     [[ -z "\${GH_MOCK_UNAUTHENTICATED:-}" ]] || exit 1
     echo "$username"
     exit 0
@@ -83,9 +88,24 @@ run_guard_command_here() {
     run bash "$BATS_TEST_DIRNAME/../../gh-switcher.sh" guard "$@"
 }
 
+# Setup proper hook test environment with working ghs command
+setup_hook_test_environment() {
+    # Create a proper ghs executable in test PATH
+    mkdir -p "$TEST_HOME/bin"
+    
+    # We need to expand the path now, not when the script runs
+    local script_path="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/gh-switcher.sh"
+    
+    # Copy the actual script to be our ghs command
+    cp "$script_path" "$TEST_HOME/bin/ghs"
+    chmod +x "$TEST_HOME/bin/ghs"
+    export PATH="$TEST_HOME/bin:$PATH"
+}
+
 # Run guard hook directly for testing
 run_guard_hook() {
     cd "$TEST_GIT_REPO"
-    export GH_SWITCHER_PATH="$BATS_TEST_DIRNAME/../../gh-switcher.sh"
-    run bash "$TEST_GUARD_SCRIPT"
+    
+    # Run the actual pre-commit hook
+    run bash "$TEST_GIT_REPO/.git/hooks/pre-commit"
 }

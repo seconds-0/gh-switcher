@@ -72,7 +72,7 @@ EOF
     
     run_guard_command "test"
     assert_success
-    assert_output_contains "Could not determine current GitHub user"
+    assert_output_contains "GitHub CLI not authenticated"
 }
 
 @test "guard handles git config with special characters" {

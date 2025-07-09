@@ -33,9 +33,10 @@ teardown() {
 
 @test "ghs assign stores user for project and auto-selects" {
     # Given – two users and a git repo
-    add_user "alice" >/dev/null 2>&1
-    add_user "bob"   >/dev/null 2>&1
+    cmd_add "alice" >/dev/null 2>&1
+    cmd_add "bob"   >/dev/null 2>&1
 
+    setup_complex_git_scenario
     cd "$TEST_MAIN_REPO"
 
     # When – assign bob (user #2) to this project
