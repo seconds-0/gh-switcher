@@ -505,7 +505,7 @@ project_assign() {
     temp_file=$(mktemp "${GH_PROJECT_CONFIG}.XXXXXX") || return 1
     
     # Ensure cleanup on any error
-    trap "rm -f '$temp_file' 2>/dev/null" EXIT
+    trap 'rm -f "$temp_file" 2>/dev/null' EXIT
     
     # Copy all assignments except the one being updated
     if [[ -f "$GH_PROJECT_CONFIG" ]]; then
