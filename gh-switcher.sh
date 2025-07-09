@@ -189,14 +189,20 @@ validate_ssh_key() {
     # Empty path is valid (HTTPS mode)
     [[ -z "$key_path" ]] && return 0
     
-    # Check for directory traversal
-    if [[ "$key_path" =~ \.\. ]]; then
-        echo "❌ SSH key path contains directory traversal detected" >&2
+    # Expand tilde first
+    key_path="${key_path/#~/$HOME}"
+    
+    # Check for directory traversal and suspicious patterns
+    if [[ "$key_path" =~ \.\. ]] || [[ "$key_path" =~ /\.\./ ]] || [[ "$key_path" =~ ^/ && "$key_path" =~ /\. ]]; then
+        echo "❌ SSH key path contains suspicious patterns" >&2
         return 1
     fi
     
-    # Expand tilde
-    key_path="${key_path/#~/$HOME}"
+    # Ensure path is absolute or relative to home
+    if [[ "$key_path" != /* ]] && [[ "$key_path" != ~/* ]]; then
+        # Convert relative path to absolute
+        key_path="$(pwd)/$key_path"
+    fi
     
     # Check file exists
     if [[ ! -f "$key_path" ]]; then
@@ -308,6 +314,14 @@ user_get_by_id() {
     # Validate with helpful errors for tests
     [[ "$user_id" =~ ^[0-9]+$ ]] || { echo "Invalid user ID: $user_id" >&2; return 1; }
     [[ -s "$GH_USERS_CONFIG" ]] || { echo "No users configured" >&2; return 1; }
+    
+    # Validate ID is within bounds
+    local total_users
+    total_users=$(wc -l < "$GH_USERS_CONFIG")
+    if [[ "$user_id" -lt 1 ]] || [[ "$user_id" -gt "$total_users" ]]; then
+        echo "User ID $user_id out of range (1-$total_users)" >&2
+        return 1
+    fi
     
     sed -n "${user_id}p" "$GH_USERS_CONFIG"
 }
@@ -431,10 +445,15 @@ profile_apply() {
     local profile
     profile=$(profile_get "$username") || return 1
     
+    # Parse profile once using single read
     local name email ssh_key
-    name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-    email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
-    ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
+    while IFS=: read -r key value; do
+        case "$key" in
+            name) name="$value" ;;
+            email) email="$value" ;;
+            ssh_key) ssh_key="$value" ;;
+        esac
+    done <<< "$profile"
     
     git_set_config "$name" "$email" "$scope" || return 1
     
@@ -505,7 +524,10 @@ project_assign() {
 project_get_user() {
     local project="${1:-$(basename "$PWD")}"
     
-    [[ -f "$GH_PROJECT_CONFIG" ]] || return 1
+    if [[ ! -f "$GH_PROJECT_CONFIG" ]]; then
+        # Silent failure - no projects configured yet
+        return 1
+    fi
     
     local assignment
     assignment=$(grep "^$project=" "$GH_PROJECT_CONFIG" | head -1)
