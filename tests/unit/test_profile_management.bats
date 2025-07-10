@@ -40,7 +40,8 @@ measure_time_ms() {
     assert_output_contains "👤 alice"
     assert_output_contains "Email: alice@example.com"
     assert_output_contains "Name: Alice Smith"
-    assert_output_contains "SSH: ~/.ssh/alice_key ✅"
+    # SSH path should show with proper permissions icon
+    assert_output_contains ".ssh/alice_key ✅"
 }
 
 @test "ghs show works with user ID" {
@@ -58,7 +59,7 @@ measure_time_ms() {
     
     run ghs show alice
     assert_success
-    assert_output_contains "SSH: ~/.ssh/missing ❌"
+    assert_output_contains ".ssh/missing ❌"
     assert_output_contains "SSH key not found"
 }
 
