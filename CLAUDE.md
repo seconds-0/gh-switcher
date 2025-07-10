@@ -54,9 +54,10 @@ ghs assign <user>         # Assign user to current directory
 ### Quality Gates (ALL must pass)
 - ✅ Tests: 100% execution, zero failures
 - ✅ ShellCheck: Clean (allowed: SC1091, SC2155, SC2181)  
-- ✅ Functions: ~50 lines (guideline for clarity)
+- ✅ Functions: ~50 lines (guideline for clarity, not hard limit)
 - ✅ Performance: <100ms commands, <300ms hooks
 - ✅ Root causes: No workarounds or test modifications
+- ✅ Plan adherence: Delivered what was promised
 
 ### Before Starting Any Task
 Ask yourself:
@@ -75,6 +76,14 @@ Ask yourself:
 1. First 15 min: Debug to understand why
 2. Next 15 min: Fix the root cause
 3. Can't fix in 30 min? Stop and document the blocker
+
+### Before Declaring "Done"
+**RULE**: Always verify against the plan
+1. Review the implementation plan/checklist
+2. Confirm all promised features are implemented
+3. Run all tests that were promised
+4. Check function line counts if refactoring
+5. Ask: "Did I do what I said I would do?"
 
 ## Code Standards
 
@@ -118,6 +127,9 @@ save_to_file_atomic() {
     echo "$content" > "$temp_file" || { rm -f "$temp_file"; return 1; }
     mv -f "$temp_file" "$file" || { rm -f "$temp_file"; return 1; }
 }
+
+# Keep it simple - prefer shell builtins over complex logic
+# Example: Use 'sort -u' instead of manual deduplication loops
 ```
 
 ### Error Handling
@@ -292,3 +304,20 @@ rm /tmp/pr-body.md
 
 ## Development Wisdom
 - Practice defensive programming when reasonable, but dont succumb to overengineering
+
+## Design Principles for Error States
+
+1. Explain what's wrong - "This file no longer exists at the configured location"
+2. Show what we found - List all alternatives with helpful hints
+3. Number the options - Makes it easy to reference
+4. Provide exact commands - Copy-paste friendly
+5. Explain consequences - "This prevents the error: ..."
+6. Always offer escape hatch - "Or use HTTPS instead"
+
+The extra verbosity in error states:
+- Reduces user anxiety
+- Prevents guesswork
+- Makes support easier ("I chose option 2")
+- Educates about the system
+
+This matches how good CLIs handle errors - think git status after a merge conflict, where it becomes very explicit about your options.
