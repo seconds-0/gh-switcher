@@ -135,7 +135,9 @@ EOF
     
     run ghs test-ssh bob
     assert_failure
-    assert_output_contains "❌ SSH key not found: ~/.ssh/missing_key"
+    # Check for the error message - path might be shown as ~ or full path
+    assert_output_contains "❌ SSH key not found:"
+    assert_output_contains ".ssh/missing_key"
     assert_output_contains "Run 'ghs show bob' for suggestions"
 }
 
@@ -176,7 +178,9 @@ EOF
     run ghs test-ssh alice
     assert_success
     assert_output_contains "🔐 Testing SSH authentication for alice"
-    assert_output_contains "Key: ~/.ssh/test_key"
+    # Check for key path - might be shown as ~ or full path
+    assert_output_contains "Key:"
+    assert_output_contains ".ssh/test_key"
     assert_output_contains "✅ SSH authentication successful"
     assert_output_contains "GitHub recognizes this key"
 }
