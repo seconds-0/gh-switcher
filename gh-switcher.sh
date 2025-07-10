@@ -583,7 +583,8 @@ test_ssh_auth() {
     # Test GitHub SSH with specific key
     # Using SSH's built-in timeout for portability (no external timeout command)
     local output
-    output=$(ssh -T git@github.com \
+    # Disable pipefail for this command as SSH returns 1 even on success
+    if output=$(ssh -T git@github.com \
         -o BatchMode=yes \
         -o StrictHostKeyChecking=no \
         -o ConnectTimeout=3 \
@@ -591,7 +592,10 @@ test_ssh_auth() {
         -o ServerAliveCountMax=1 \
         -o IdentitiesOnly=yes \
         -o IdentityFile="$ssh_key" \
-        2>&1)
+        2>&1); then
+        # SSH returned 0 (shouldn't happen with GitHub)
+        true
+    fi
     
     # SSH to GitHub returns 1 even on success, check the output
     if [[ "$output" =~ "successfully authenticated" ]]; then
@@ -1099,8 +1103,23 @@ cmd_add() {
         # Test SSH authentication if key is valid
         if [[ -n "$ssh_key" ]] && [[ -f "$ssh_key" ]]; then
             echo "🔐 Testing SSH authentication..."
-            test_ssh_auth "$ssh_key"
-            case "$?" in
+            local result exit_code
+            
+            # Run SSH test and capture both output and exit code
+            if result=$(test_ssh_auth "$ssh_key" 2>&1); then
+                exit_code=0
+            else
+                exit_code=$?
+            fi
+            
+            # Check if it was an auth failure or network issue
+            if [[ "$result" == "auth_failed" ]]; then
+                exit_code=1
+            elif [[ "$result" == "connection_failed" ]]; then
+                exit_code=2
+            fi
+            
+            case "$exit_code" in
                 0)  # Success
                     echo "✅ SSH key authenticated successfully"
                     ;;
