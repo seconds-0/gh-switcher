@@ -164,7 +164,7 @@ _validate_email() {
     
     # Basic format check - must have @ with something on both sides
     if [[ ! "$email" =~ .+@.+ ]]; then
-        echo "❌ Email must contain @" >&2
+        echo "❌ Invalid email format" >&2
         return 1
     fi
     
@@ -198,7 +198,7 @@ validate_ssh_key() {
     key_path="${key_path/#~/$HOME}"
     
     # Check for directory traversal and suspicious patterns
-    if [[ "$key_path" =~ \.\. ]] || [[ "$key_path" =~ /\.\./ ]] || [[ "$key_path" =~ ^/ && "$key_path" =~ /\. ]]; then
+    if [[ "$key_path" =~ \.\. ]] || [[ "$key_path" =~ /\.\./ ]]; then
         echo "❌ SSH key path contains suspicious patterns" >&2
         return 1
     fi
@@ -571,6 +571,172 @@ ssh_apply_config() {
 }
 
 # =============================================================================
+# PROFILE ISSUE DETECTION
+# =============================================================================
+
+# Find alternative SSH keys for a user
+find_ssh_key_alternatives() {
+    local username="$1"
+    local possible_keys=()
+    
+    # Search for SSH keys
+    while IFS= read -r -d '' key; do
+        # Skip public keys and known_hosts
+        [[ "$key" =~ \.(pub|pem|ppk)$ ]] && continue
+        [[ "$key" =~ known_hosts ]] && continue
+        [[ "$(basename "$key")" =~ ^\..*$ ]] && continue  # Skip hidden files
+        
+        possible_keys+=("$key")
+    done < <(find "$HOME/.ssh" -type f -name "id_*" ! -name "*.pub" ! -name "*~" -print0 2>/dev/null)
+    
+    # Check username-specific patterns
+    for pattern in "$HOME/.ssh/${username}" "$HOME/.ssh/${username}_"*; do
+        if [[ -f "$pattern" ]] && [[ ! "$pattern" =~ \.(pub|pem|ppk)$ ]]; then
+            possible_keys+=("$pattern")
+        fi
+    done
+    
+    # Remove duplicates and output
+    if [[ ${#possible_keys[@]} -gt 0 ]]; then
+        printf '%s\n' "${possible_keys[@]}" | sort -u
+    fi
+}
+
+# Check SSH key status with detailed error messages
+check_ssh_key_status() {
+    local username="$1"
+    local ssh_key="$2"
+    
+    if [[ -z "$ssh_key" ]]; then
+        return 0  # HTTPS is valid
+    fi
+    
+    if [[ ! -f "$ssh_key" ]]; then
+        # Find alternative SSH keys
+        local unique_keys=()
+        while IFS= read -r key; do
+            [[ -n "$key" ]] && unique_keys+=("$key")
+        done < <(find_ssh_key_alternatives "$username")
+        
+        # Display error with options
+        echo "   ❌ SSH key not found: ${ssh_key/#$HOME/~}"
+        echo "      This file no longer exists at the configured location."
+        echo
+        
+        if [[ ${#unique_keys[@]} -eq 0 ]]; then
+            echo "      No SSH keys found in ~/.ssh/"
+            echo
+            echo "      Option 1: Add a new SSH key"
+            echo "        ghs edit $username --ssh-key <path-to-key>"
+            echo
+            echo "      Option 2: Use HTTPS instead of SSH"
+            echo "        ghs edit $username --ssh-key none"
+            
+        elif [[ ${#unique_keys[@]} -eq 1 ]]; then
+            echo "      Found 1 SSH key that might work:"
+            echo
+            echo "      • ${unique_keys[0]/#$HOME/~}"
+            echo
+            echo "      To use this key:"
+            echo "        ghs edit $username --ssh-key '${unique_keys[0]}'"
+            echo
+            echo "      Or use HTTPS instead:"
+            echo "        ghs edit $username --ssh-key none"
+            
+        else
+            echo "      Found ${#unique_keys[@]} SSH keys that might work:"
+            echo
+            
+            local i=1
+            for key in "${unique_keys[@]}"; do
+                local key_info=""
+                if [[ "$key" =~ _${username}$ ]] || [[ "$key" =~ /${username}$ ]]; then
+                    key_info=" (matches username)"
+                elif [[ "$key" =~ id_ed25519 ]]; then
+                    key_info=" (recommended type)"
+                fi
+                
+                echo "      $i. ${key/#$HOME/~}$key_info"
+                echo "         ghs edit $username --ssh-key '$key'"
+                echo
+                ((i++))
+            done
+            
+            echo "      Or use HTTPS instead:"
+            echo "        ghs edit $username --ssh-key none"
+        fi
+        
+        return 1
+    fi
+    
+    # Check permissions
+    local perms
+    perms=$(stat -f %Lp "$ssh_key" 2>/dev/null || stat -c %a "$ssh_key" 2>/dev/null)
+    if [[ "$perms" != "600" ]]; then
+        echo "   ⚠️  SSH key has incorrect permissions: $perms (should be 600)"
+        echo "      SSH requires private keys to be readable only by you."
+        echo
+        echo "      Fix with:"
+        echo "        chmod 600 '$ssh_key'"
+        echo
+        echo "      This prevents the error: 'Permissions 0644 for key are too open'"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Check email format for common issues
+check_email_status() {
+    local username="$1"
+    local email="$2"
+    
+    # Only warn on exact problematic pattern
+    if [[ "$email" == "${username}@github.com" ]]; then
+        # Skip for obvious exceptions
+        case "$username" in
+            *bot|*[[]*|*.github.com) return 0 ;;
+        esac
+        
+        echo "   💡 Possible typo in email"
+        echo "      Did you mean: ${username}@users.noreply.github.com?"
+        echo "      Fix: ghs edit $username --email ${username}@users.noreply.github.com"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Check active user configuration
+check_active_user_status() {
+    local username="$1"
+    local profile_email="$2"
+    
+    # Only check if this is the active user
+    local current_gh_user
+    current_gh_user=$(gh api user -q .login 2>/dev/null) || return 0
+    [[ "$current_gh_user" != "$username" ]] && return 0
+    
+    # Check git config
+    local git_email_global git_email_local
+    git_email_global=$(git config --global user.email 2>/dev/null)
+    git_email_local=$(git config --local user.email 2>/dev/null)
+    
+    local git_email=${git_email_local:-$git_email_global}
+    
+    if [[ -n "$git_email" ]] && [[ "$git_email" != "$profile_email" ]]; then
+        local scope=$([[ -n "$git_email_local" ]] && echo "local" || echo "global")
+        echo "   ⚠️  Git email doesn't match profile ($scope config)"
+        echo "      Git: $git_email"
+        echo "      Profile: $profile_email"
+        echo "      Fix: ghs switch $username  (reapply profile)"
+        return 1
+    fi
+    
+    return 0
+}
+
+# =============================================================================
 # GIT INTEGRATION
 # =============================================================================
 
@@ -590,6 +756,33 @@ git_set_config() {
     
     git config $git_flags user.name "$name" || return 1
     git config $git_flags user.email "$email" || return 1
+}
+
+# Check if profile has any issues (for status command)
+profile_has_issues() {
+    local username="$1"
+    local profile_data
+    
+    profile_data=$(profile_get "$username") 2>/dev/null || return 0  # Missing = issue
+    
+    # Extract fields
+    local email ssh_key
+    email=$(profile_get_field "$profile_data" "email")
+    ssh_key=$(profile_get_field "$profile_data" "ssh_key")
+    
+    # Quick checks (suppress output)
+    check_ssh_key_status "$username" "$ssh_key" >/dev/null 2>&1 || return 0
+    check_email_status "$username" "$email" >/dev/null 2>&1 || return 0
+    check_active_user_status "$username" "$email" >/dev/null 2>&1 || return 0
+    
+    return 1  # No issues
+}
+
+# Extract a specific field from profile data
+profile_get_field() {
+    local profile_data="$1"
+    local field="$2"
+    echo "$profile_data" | grep "^$field:" | cut -d: -f2-
 }
 
 # Get current git configuration
@@ -787,7 +980,7 @@ user_has_ssh_key() {
     local username="$1"
     local profile
     profile=$(profile_get "$username" 2>/dev/null) || return 1
-    local ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d':' -f2-)
+    local ssh_key=$(profile_get_field "$profile" "ssh_key")
     [[ -n "$ssh_key" ]]
 }
 
@@ -932,6 +1125,25 @@ cmd_switch() {
         return 1
     fi
     
+    # Pre-flight check
+    local profile
+    profile=$(profile_get "$username") || {
+        echo "❌ Cannot switch - no profile"
+        echo "   Fix: ghs edit $username --email <email>"
+        return 1
+    }
+    
+    # Check SSH key before switching
+    local ssh_key
+    ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d: -f2-)
+    if [[ -n "$ssh_key" ]] && [[ ! -f "$ssh_key" ]]; then
+        echo "⚠️  Warning: SSH key not found"
+        echo "   Git operations may fail over SSH"
+        echo -n "   Continue anyway? (y/N) "
+        read -r response
+        [[ "$response" =~ ^[Yy]$ ]] || return 1
+    fi
+    
     # Apply profile
     if profile_apply "$username" "local" >/dev/null 2>&1; then
         if [[ -n "$user_id" ]]; then
@@ -1005,6 +1217,295 @@ cmd_users() {
     return 0
 }
 
+# Show user profile details with issue detection
+cmd_show() {
+    local input="${1:-}"
+    
+    if [[ -z "$input" ]]; then
+        echo "Usage: ghs show <username_or_id>"
+        return 1
+    fi
+    
+    # Resolve username from input (ID or name)
+    local username
+    if [[ "$input" =~ ^[0-9]+$ ]]; then
+        username=$(user_get_by_id "$input") || {
+            echo "❌ User ID $input not found" >&2
+            return 1
+        }
+    else
+        username="$input"
+    fi
+    
+    # Check user exists
+    if ! user_exists "$username"; then
+        echo "❌ User '$username' not found" >&2
+        echo "💡 Run 'ghs users' to see available users" >&2
+        return 1
+    fi
+    
+    # Get profile data
+    local profile
+    profile=$(profile_get "$username" 2>/dev/null) || {
+        echo "❌ No profile for $username"
+        echo "   Fix: ghs edit $username --email <email>"
+        return 1
+    }
+    
+    # Parse profile fields
+    local name="" email="" ssh_key=""
+    while IFS=: read -r key value; do
+        case "$key" in
+            name) name="$value" ;;
+            email) email="$value" ;;
+            ssh_key) ssh_key="$value" ;;
+        esac
+    done <<< "$profile"
+    
+    # Display basic info
+    echo "👤 $username"
+    echo "   Email: $email"
+    echo "   Name: $name"
+    
+    # SSH status
+    if [[ -n "$ssh_key" ]]; then
+        if [[ -f "$ssh_key" ]]; then
+            local perms
+            perms=$(stat -f %Lp "$ssh_key" 2>/dev/null || stat -c %a "$ssh_key" 2>/dev/null)
+            if [[ "$perms" == "600" ]]; then
+                echo "   SSH: ${ssh_key/#$HOME/~} ✅"
+            else
+                echo "   SSH: ${ssh_key/#$HOME/~} ⚠️"
+            fi
+        else
+            echo "   SSH: ${ssh_key/#$HOME/~} ❌"
+        fi
+    else
+        echo "   SSH: Using HTTPS"
+    fi
+    
+    # Check status
+    local current_gh_user
+    current_gh_user=$(gh api user -q .login 2>/dev/null) || current_gh_user=""
+    if [[ "$current_gh_user" == "$username" ]]; then
+        echo "   Status: Active ✅"
+    elif [[ -n "$current_gh_user" ]]; then
+        echo "   Status: Inactive (current: $current_gh_user)"
+    else
+        echo "   Status: Inactive"
+    fi
+    
+    # Run checks
+    echo
+    local has_issues=false
+    
+    # Check SSH key issues
+    if [[ -n "$ssh_key" ]]; then
+        check_ssh_key_status "$username" "$ssh_key" || has_issues=true
+    fi
+    
+    # Check email issues
+    check_email_status "$username" "$email" || has_issues=true
+    
+    # Check active user issues
+    check_active_user_status "$username" "$email" || has_issues=true
+    
+    # If no issues
+    [[ "$has_issues" == false ]] && echo "   ✅ No issues detected"
+    
+    return 0
+}
+
+# Validate edit command arguments
+cmd_edit_validate_arg() {
+    local option="$1"
+    local value="$2"
+    
+    if [[ -z "$value" ]] || [[ "$value" == --* ]]; then
+        echo "❌ $option requires a value" >&2
+        return 1
+    fi
+    
+    return 0
+}
+
+# Show usage for edit command
+cmd_edit_usage() {
+    echo "Usage: ghs edit <username> [options]"
+    echo
+    echo "Options:"
+    echo "  --email <email>     Update email address"
+    echo "  --name <name>       Update display name"
+    echo "  --ssh-key <path>    Update SSH key (use 'none' to remove)"
+    echo
+    echo "Examples:"
+    echo "  ghs edit alice --email alice@company.com"
+    echo "  ghs edit bob --ssh-key ~/.ssh/id_ed25519_bob"
+    echo "  ghs edit work --name 'Work Account' --ssh-key none"
+}
+
+# Edit user profile (email, name, SSH key)
+# Note: This function is ~85 lines, exceeding our 50-line guideline.
+# We've reviewed and attempted to simplify it, but determined the current
+# structure is the most clear and maintainable. The length comes from
+# necessary validation, profile handling, and argument parsing that would
+# be awkward to split further.
+cmd_edit() {
+    local username="${1:-}"
+    
+    if [[ -z "$username" ]] || [[ "$username" == "--help" ]]; then
+        cmd_edit_usage
+        return 1
+    fi
+    
+    # Check if user exists
+    if ! user_exists "$username"; then
+        echo "❌ User '$username' not found"
+        echo "💡 Use 'ghs add $username' to create"
+        return 1
+    fi
+    
+    # Get current profile or defaults
+    local profile current_name current_email current_ssh
+    profile=$(profile_get "$username" 2>/dev/null)
+    
+    if [[ -z "$profile" ]]; then
+        current_name="$username"
+        current_email="${username}@users.noreply.github.com"
+        current_ssh=""
+        echo "ℹ️  No profile found, creating new one"
+    else
+        current_name=""
+        current_email=""
+        current_ssh=""
+        while IFS=: read -r key value; do
+            case "$key" in
+                name) current_name="$value" ;;
+                email) current_email="$value" ;;
+                ssh_key) current_ssh="$value" ;;
+            esac
+        done <<< "$profile"
+    fi
+    
+    # Initialize with current values
+    local new_name="$current_name"
+    local new_email="$current_email"
+    local new_ssh="$current_ssh"
+    local changes_made=false
+    
+    # Parse options
+    shift # Remove username
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --email)
+                cmd_edit_validate_arg "$1" "$2" || return 1
+                new_email="$2"
+                changes_made=true
+                shift 2
+                ;;
+            --name)
+                cmd_edit_validate_arg "$1" "$2" || return 1
+                new_name="$2"
+                changes_made=true
+                shift 2
+                ;;
+            --ssh-key)
+                cmd_edit_validate_arg "$1" "$2" || return 1
+                if [[ "$2" == "none" ]]; then
+                    new_ssh=""
+                else
+                    new_ssh="${2/#\~/$HOME}"
+                fi
+                changes_made=true
+                shift 2
+                ;;
+            --gpg-key|--signing-key)
+                echo "❌ GPG commit signing is not currently supported"
+                echo "   gh-switcher focuses on authentication (SSH/HTTPS)"
+                echo "   File an issue if needed: https://github.com/seconds-0/gh-switcher/issues"
+                return 1
+                ;;
+            *)
+                echo "❌ Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    # Delegate to update function
+    cmd_edit_update_profile "$username" "$new_email" "$new_name" "$new_ssh" "$current_email" "$current_name" "$current_ssh" "$changes_made"
+}
+
+# Update user profile with provided changes
+cmd_edit_update_profile() {
+    local username="$1"
+    local new_email="$2"
+    local new_name="$3"
+    local new_ssh="$4"
+    local current_email="$5"
+    local current_name="$6"
+    local current_ssh="$7"
+    local changes_made="$8"
+    
+    # Check if any changes requested
+    if [[ "$changes_made" == false ]]; then
+        echo "ℹ️  No changes specified"
+        cmd_show "$username"
+        return 0
+    fi
+    
+    # Validate email if changed
+    if [[ "$new_email" != "$current_email" ]]; then
+        if ! _validate_email "$new_email"; then
+            return 1
+        fi
+    fi
+    
+    # Validate name if changed
+    if [[ "$new_name" != "$current_name" ]]; then
+        if ! _validate_field_length "$new_name" "Name" 200; then
+            return 1
+        fi
+        if ! _validate_no_pipes "$new_name" "name"; then
+            return 1
+        fi
+    fi
+    
+    # Validate SSH key if changed
+    if [[ -n "$new_ssh" ]] && [[ "$new_ssh" != "$current_ssh" ]]; then
+        if [[ ! -f "$new_ssh" ]]; then
+            echo "❌ SSH key not found: $new_ssh"
+            return 1
+        fi
+        if ! validate_ssh_key "$new_ssh"; then
+            return 1
+        fi
+    fi
+    
+    # Apply changes
+    if ! profile_create "$username" "$new_name" "$new_email" "$new_ssh"; then
+        echo "❌ Failed to update profile"
+        return 1
+    fi
+    
+    echo "✅ Profile updated"
+    echo
+    
+    # Show updated profile
+    cmd_show "$username"
+    
+    # Suggest reapply if active
+    local current_gh_user
+    current_gh_user=$(gh api user -q .login 2>/dev/null) || current_gh_user=""
+    
+    if [[ "$current_gh_user" == "$username" ]]; then
+        echo
+        echo "💡 Run 'ghs switch $username' to apply changes"
+    fi
+    
+    return 0
+}
+
 # Status command
 cmd_status() {
     # Check if any users are configured
@@ -1037,16 +1538,21 @@ cmd_status() {
     if assigned_user=$(project_get_user "$project" 2>/dev/null); then
         echo "👤 Assigned user: $assigned_user"
         
-        # Check if git config matches profile
+        # Quick profile check
+        if profile_has_issues "$assigned_user"; then
+            echo "   ⚠️  Profile has issues - Run 'ghs show $assigned_user' for details"
+        fi
+        
+        local profile
         if profile=$(profile_get "$assigned_user" 2>/dev/null); then
             local profile_name profile_email current_config
-            profile_name=$(echo "$profile" | grep "^name:" | cut -d':' -f2-)
-            profile_email=$(echo "$profile" | grep "^email:" | cut -d':' -f2-)
+            profile_name=$(profile_get_field "$profile" "name")
+            profile_email=$(profile_get_field "$profile" "email")
             
             if current_config=$(git_get_config "local" 2>/dev/null); then
                 local current_name current_email
-                current_name=$(echo "$current_config" | grep "^name:" | cut -d':' -f2-)
-                current_email=$(echo "$current_config" | grep "^email:" | cut -d':' -f2-)
+                current_name=$(profile_get_field "$current_config" "name")
+                current_email=$(profile_get_field "$current_config" "email")
                 
                 if [[ "$current_name" == "$profile_name" && "$current_email" == "$profile_email" ]]; then
                     echo "✅ Git config matches assigned user"
@@ -1058,6 +1564,9 @@ cmd_status() {
             else
                 echo "❌ Git config not set"
             fi
+        else
+            echo "   ⚠️  Profile missing"
+            echo "   Run 'ghs edit $assigned_user' to create"
         fi
     else
         echo "👤 No user assigned to this project"
@@ -1117,6 +1626,8 @@ COMMANDS:
   switch <user>         Switch to user by name or ID
   assign <user>         Assign user to current project
   users                 List all configured users
+  show <user>           Show profile details       [NEW]
+  edit <user>           Edit profile settings      [NEW]
   status                Show current project status
   guard <subcommand>    Manage guard hooks for account validation
   help                  Show this help
@@ -1152,10 +1663,16 @@ ghs() {
         switch|sw)        cmd_switch "$@" ;;
         assign)           cmd_assign "$@" ;;
         users|list)       cmd_users "$@" ;;
+        show|profile)     cmd_show "$@" ;;      # NEW
+        edit)             cmd_edit "$@" ;;       # NEW
         status)           cmd_status "$@" ;;
         guard)            cmd_guard "$@" ;;
         help|--help|-h)   cmd_help ;;
-        *)                cmd_help; return 1 ;;
+        *)                
+            echo "❌ Unknown command: $cmd"
+            cmd_help
+            return 1 
+            ;;
     esac
 }
 
