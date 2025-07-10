@@ -1014,9 +1014,9 @@ cmd_status() {
         echo "GitHub account switcher for developers"
         echo
         echo "📝 Quick start:"
-        echo "  ghs add current              # Add your current GitHub user"
-        echo "  ghs add username                # Add by GitHub username"
-        echo "  ghs add work --ssh-key path  # Add with specific SSH key"
+        echo "  ghs add <username>           # Add by GitHub username"
+        echo "  ghs add work                 # Add another GitHub account"
+        echo "  ghs add bob --ssh-key ~/.ssh/id_rsa_work  # Add with SSH key"
         echo
         echo "💡 Why use ghs?"
         echo "  • Switch GitHub accounts in <100ms"
