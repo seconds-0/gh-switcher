@@ -1692,7 +1692,7 @@ cmd_status() {
 }
 
 # Test SSH authentication command
-# Note: This function is ~100 lines, exceeding our 50-line guideline.
+# Note: This function is ~101 lines, exceeding our 50-line guideline.
 # We've reviewed and determined the length is justified by:
 # 1. Comprehensive option parsing for flexibility
 # 2. Multiple validation steps with specific error handling
