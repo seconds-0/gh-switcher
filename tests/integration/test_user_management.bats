@@ -36,6 +36,17 @@ teardown() {
     # Given
     local ssh_key="$TEST_ED25519_KEY"
     
+    # Mock SSH to avoid real authentication test
+    cat > "$TEST_HOME/ssh" << 'EOF'
+#!/bin/bash
+if [[ "$*" =~ "-T git@github.com" ]]; then
+    echo "Hi testuser! You've successfully authenticated, but GitHub does not provide shell access." >&2
+    exit 1
+fi
+EOF
+    chmod +x "$TEST_HOME/ssh"
+    export PATH="$TEST_HOME:$PATH"
+    
     # When
     run cmd_add "testuser" --ssh-key "$ssh_key"
     
@@ -61,6 +72,17 @@ teardown() {
 @test "add_user fixes SSH key permissions" {
     # Given
     local ssh_key="$TEST_WRONG_PERMS_KEY"
+    
+    # Mock SSH to avoid real authentication test
+    cat > "$TEST_HOME/ssh" << 'EOF'
+#!/bin/bash
+if [[ "$*" =~ "-T git@github.com" ]]; then
+    echo "Hi testuser! You've successfully authenticated, but GitHub does not provide shell access." >&2
+    exit 1
+fi
+EOF
+    chmod +x "$TEST_HOME/ssh"
+    export PATH="$TEST_HOME:$PATH"
     
     # When
     run cmd_add "testuser" --ssh-key "$ssh_key"
@@ -204,9 +226,20 @@ teardown() {
 }
 
 @test "list_users shows SSH status for working keys" {
-    # Given
+    # Mock SSH to avoid real authentication test
+    cat > "$TEST_HOME/ssh" << 'EOF'
+#!/bin/bash
+if [[ "$*" =~ "-T git@github.com" ]]; then
+    echo "Hi! You've successfully authenticated, but GitHub does not provide shell access." >&2
+    exit 1
+fi
+EOF
+    chmod +x "$TEST_HOME/ssh"
+    export PATH="$TEST_HOME:$PATH"
+    
+    # Given - use the existing PATH with mocked SSH
     cmd_add "httpsuser" >/dev/null 2>&1
-    cmd_add "sshuser" --ssh-key "$TEST_ED25519_KEY" >/dev/null 2>&1
+    echo "" | cmd_add "sshuser" --ssh-key "$TEST_ED25519_KEY" >/dev/null 2>&1
     
     # When
     run cmd_users
