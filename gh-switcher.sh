@@ -29,6 +29,11 @@ readonly GH_PROJECT_CONFIG="${GH_PROJECT_CONFIG:-$HOME/.gh-project-accounts}"
 
 # Initialize configuration files
 init_config() {
+    # Ensure variables are set (defensive programming for shell environments)
+    : "${GH_USERS_CONFIG:=$HOME/.gh-users}"
+    : "${GH_USER_PROFILES:=$HOME/.gh-user-profiles}"
+    : "${GH_PROJECT_CONFIG:=$HOME/.gh-project-accounts}"
+    
     [[ -f "$GH_USERS_CONFIG" ]] || touch "$GH_USERS_CONFIG"
     [[ -f "$GH_USER_PROFILES" ]] || touch "$GH_USER_PROFILES"
     [[ -f "$GH_PROJECT_CONFIG" ]] || touch "$GH_PROJECT_CONFIG"
@@ -1002,6 +1007,26 @@ cmd_users() {
 
 # Status command
 cmd_status() {
+    # Check if any users are configured
+    if [[ $(user_count) -eq 0 ]]; then
+        echo "🎯 GitHub Project Switcher (ghs)"
+        echo
+        echo "GitHub account switcher for developers"
+        echo
+        echo "📝 Quick start:"
+        echo "  ghs add current              # Add your current GitHub user"
+        echo "  ghs add username                # Add by GitHub username"
+        echo "  ghs add work --ssh-key path  # Add with specific SSH key"
+        echo
+        echo "💡 Why use ghs?"
+        echo "  • Switch GitHub accounts in <100ms"
+        echo "  • Prevent wrong-account commits with guard hooks"
+        echo "  • Auto-switch accounts by project directory"
+        echo
+        echo "Type 'ghs help' for all commands"
+        return 0
+    fi
+    
     local project
     project=$(git_get_repo 2>/dev/null) || project=$(basename "$PWD")
     
