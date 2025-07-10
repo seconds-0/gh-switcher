@@ -450,15 +450,11 @@ profile_apply() {
     local profile
     profile=$(profile_get "$username") || return 1
     
-    # Parse profile once using single read
+    # Parse profile using helper
     local name email ssh_key
-    while IFS=: read -r key value; do
-        case "$key" in
-            name) name="$value" ;;
-            email) email="$value" ;;
-            ssh_key) ssh_key="$value" ;;
-        esac
-    done <<< "$profile"
+    name=$(profile_get_field "$profile" "name")
+    email=$(profile_get_field "$profile" "email")
+    ssh_key=$(profile_get_field "$profile" "ssh_key")
     
     git_set_config "$name" "$email" "$scope" || return 1
     
@@ -672,6 +668,8 @@ check_ssh_key_status() {
     # Check permissions
     local perms
     perms=$(stat -f %Lp "$ssh_key" 2>/dev/null || stat -c %a "$ssh_key" 2>/dev/null)
+    # Ensure we only get numeric permissions (filter out any extra output)
+    perms=$(echo "$perms" | grep -E '^[0-7]+$' | head -1)
     if [[ "$perms" != "600" ]]; then
         echo "   ⚠️  SSH key has incorrect permissions: $perms (should be 600)"
         echo "      SSH requires private keys to be readable only by you."
@@ -1253,14 +1251,10 @@ cmd_show() {
     }
     
     # Parse profile fields
-    local name="" email="" ssh_key=""
-    while IFS=: read -r key value; do
-        case "$key" in
-            name) name="$value" ;;
-            email) email="$value" ;;
-            ssh_key) ssh_key="$value" ;;
-        esac
-    done <<< "$profile"
+    local name email ssh_key
+    name=$(profile_get_field "$profile" "name")
+    email=$(profile_get_field "$profile" "email")
+    ssh_key=$(profile_get_field "$profile" "ssh_key")
     
     # Display basic info
     echo "👤 $username"
@@ -1272,6 +1266,8 @@ cmd_show() {
         if [[ -f "$ssh_key" ]]; then
             local perms
             perms=$(stat -f %Lp "$ssh_key" 2>/dev/null || stat -c %a "$ssh_key" 2>/dev/null)
+            # Ensure we only get numeric permissions (filter out any extra output)
+            perms=$(echo "$perms" | grep -E '^[0-7]+$' | head -1)
             if [[ "$perms" == "600" ]]; then
                 echo "   SSH: ${ssh_key/#$HOME/~} ✅"
             else
@@ -1375,16 +1371,9 @@ cmd_edit() {
         current_ssh=""
         echo "ℹ️  No profile found, creating new one"
     else
-        current_name=""
-        current_email=""
-        current_ssh=""
-        while IFS=: read -r key value; do
-            case "$key" in
-                name) current_name="$value" ;;
-                email) current_email="$value" ;;
-                ssh_key) current_ssh="$value" ;;
-            esac
-        done <<< "$profile"
+        current_name=$(profile_get_field "$profile" "name")
+        current_email=$(profile_get_field "$profile" "email")
+        current_ssh=$(profile_get_field "$profile" "ssh_key")
     fi
     
     # Initialize with current values
@@ -1414,7 +1403,7 @@ cmd_edit() {
                 if [[ "$2" == "none" ]]; then
                     new_ssh=""
                 else
-                    new_ssh="${2/#\~/$HOME}"
+                    new_ssh="${2/#~/$HOME}"
                 fi
                 changes_made=true
                 shift 2
