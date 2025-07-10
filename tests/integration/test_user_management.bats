@@ -22,7 +22,7 @@ teardown() {
 # Test basic user addition
 @test "add_user creates user without SSH key" {
     # When
-    run add_user "testuser"
+    run cmd_add "testuser"
     
     # Then
     assert_success
@@ -37,7 +37,7 @@ teardown() {
     local ssh_key="$TEST_ED25519_KEY"
     
     # When
-    run add_user "testuser" --ssh-key "$ssh_key"
+    run cmd_add "testuser" --ssh-key "$ssh_key"
     
     # Then
     assert_success
@@ -49,7 +49,7 @@ teardown() {
 
 @test "add_user continues with warning when SSH key missing" {
     # When
-    run add_user "testuser" --ssh-key "/nonexistent/key"
+    run cmd_add "testuser" --ssh-key "/nonexistent/key"
     
     # Then
     assert_success  # User creation should continue despite SSH failure
@@ -63,7 +63,7 @@ teardown() {
     local ssh_key="$TEST_WRONG_PERMS_KEY"
     
     # When
-    run add_user "testuser" --ssh-key "$ssh_key"
+    run cmd_add "testuser" --ssh-key "$ssh_key"
     
     # Then
     assert_success
@@ -76,7 +76,7 @@ teardown() {
     local invalid_key="$TEST_INVALID_KEY"
     
     # When
-    run add_user "testuser" --ssh-key "$invalid_key"
+    run cmd_add "testuser" --ssh-key "$invalid_key"
     
     # Then
     assert_success  # User creation should continue despite SSH warning
@@ -86,7 +86,7 @@ teardown() {
 
 @test "add_user rejects invalid username format" {
     # When
-    run add_user "invalid user name"
+    run cmd_add "invalid user name"
     
     # Then
     assert_failure
@@ -95,10 +95,10 @@ teardown() {
 
 @test "add_user handles duplicate usernames" {
     # Given
-    add_user "testuser" >/dev/null 2>&1
+    cmd_add "testuser" >/dev/null 2>&1
     
     # When
-    run add_user "testuser"
+    run cmd_add "testuser"
     
     # Then
     assert_success
@@ -107,7 +107,7 @@ teardown() {
 
 @test "add_user shows usage when no username provided" {
     # When
-    run add_user
+    run cmd_add
     
     # Then
     assert_failure
@@ -117,7 +117,7 @@ teardown() {
 
 @test "add_user rejects unknown options" {
     # When
-    run add_user "testuser" --unknown-option
+    run cmd_add "testuser" --unknown-option
     
     # Then
     assert_failure
@@ -127,10 +127,10 @@ teardown() {
 # Test user removal
 @test "remove_user removes user by name" {
     # Given
-    add_user "testuser" >/dev/null 2>&1
+    cmd_add "testuser" >/dev/null 2>&1
     
     # When
-    run remove_user "testuser"
+    run cmd_remove "testuser"
     
     # Then
     assert_success
@@ -140,10 +140,10 @@ teardown() {
 
 @test "remove_user removes user by number" {
     # Given
-    add_user "testuser" >/dev/null 2>&1
+    cmd_add "testuser" >/dev/null 2>&1
     
     # When
-    run remove_user "1"
+    run cmd_remove "1"
     
     # Then
     assert_success
@@ -153,7 +153,7 @@ teardown() {
 
 @test "remove_user handles non-existent user" {
     # When
-    run remove_user "nonexistent"
+    run cmd_remove "nonexistent"
     
     # Then
     assert_failure
@@ -162,7 +162,7 @@ teardown() {
 
 @test "remove_user handles invalid user ID when no users exist" {
     # When
-    run remove_user "999"
+    run cmd_remove "999"
     
     # Then
     assert_failure
@@ -171,7 +171,7 @@ teardown() {
 
 @test "remove_user shows usage when no user provided" {
     # When
-    run remove_user
+    run cmd_remove
     
     # Then
     assert_failure
@@ -181,7 +181,7 @@ teardown() {
 # Test user listing
 @test "list_users shows empty state" {
     # When
-    run list_users
+    run cmd_users
     
     # Then
     assert_success
@@ -191,11 +191,11 @@ teardown() {
 
 @test "list_users shows users with numbers" {
     # Given
-    add_user "user1" >/dev/null 2>&1
-    add_user "user2" >/dev/null 2>&1
+    cmd_add "user1" >/dev/null 2>&1
+    cmd_add "user2" >/dev/null 2>&1
     
     # When
-    run list_users
+    run cmd_users
     
     # Then
     assert_success
@@ -205,11 +205,11 @@ teardown() {
 
 @test "list_users shows SSH status for working keys" {
     # Given
-    add_user "httpsuser" >/dev/null 2>&1
-    add_user "sshuser" --ssh-key "$TEST_ED25519_KEY" >/dev/null 2>&1
+    cmd_add "httpsuser" >/dev/null 2>&1
+    cmd_add "sshuser" --ssh-key "$TEST_ED25519_KEY" >/dev/null 2>&1
     
     # When
-    run list_users
+    run cmd_users
     
     # Then
     assert_success
@@ -222,10 +222,10 @@ teardown() {
 # Test user ID resolution
 @test "get_user_by_id returns correct username" {
     # Given
-    add_user "testuser" >/dev/null 2>&1
+    cmd_add "testuser" >/dev/null 2>&1
     
     # When
-    run get_user_by_id "1"
+    run user_get_by_id "1"
     
     # Then
     assert_success
@@ -234,7 +234,7 @@ teardown() {
 
 @test "get_user_by_id handles invalid ID" {
     # When
-    run get_user_by_id "invalid"
+    run user_get_by_id "invalid"
     
     # Then
     assert_failure
@@ -243,7 +243,7 @@ teardown() {
 
 @test "get_user_by_id handles non-existent ID when no users" {
     # When
-    run get_user_by_id "999"
+    run user_get_by_id "999"
     
     # Then
     assert_failure
@@ -253,18 +253,19 @@ teardown() {
 # Test profile integration
 @test "add_user creates profile with git config" {
     # Given
+    setup_complex_git_scenario
     cd "$TEST_MAIN_REPO"
     git config user.name "Existing Name"
     git config user.email "existing@example.com"
     
     # When
-    run add_user "testuser"
+    run cmd_add "testuser"
     
     # Then
     assert_success
     
     # Check profile exists and can be retrieved
-    run get_user_profile "testuser"
+    run profile_get "testuser"
     assert_success
     assert_output_contains "name:testuser"
     assert_output_contains "email:testuser@users.noreply.github.com"

@@ -110,7 +110,7 @@ assert_user_not_exists() {
 assert_profile_exists() {
     local username="$1"
     local profile
-    profile=$(get_user_profile "$username" 2>/dev/null)
+    profile=$(profile_get "$username" 2>/dev/null)
     [[ $? -eq 0 ]] || {
         echo "Expected profile to exist for user: $username"
         debug_test_state
@@ -123,7 +123,7 @@ assert_profile_has_ssh_key() {
     local username="$1"
     local expected_ssh_key="$2"
     local profile
-    profile=$(get_user_profile "$username")
+    profile=$(profile_get "$username")
     [[ $? -eq 0 ]] || {
         echo "Profile does not exist for user: $username"
         return 1
@@ -141,7 +141,7 @@ assert_profile_has_ssh_key() {
 assert_profile_has_no_ssh_key() {
     local username="$1"
     local profile
-    profile=$(get_user_profile "$username")
+    profile=$(profile_get "$username")
     [[ $? -eq 0 ]] || {
         echo "Profile does not exist for user: $username"
         return 1

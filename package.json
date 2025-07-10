@@ -15,7 +15,9 @@
     "install-global": "echo 'source $(pwd)/gh-switcher.sh' >> ~/.zshrc && echo 'Added to ~/.zshrc - restart your terminal'",
     "uninstall-global": "sed -i.bak '/gh-switcher.sh/d' ~/.zshrc && echo 'Removed from ~/.zshrc'",
     "install-hook": "bash gh-switcher.sh guard install",
-    "uninstall-hook": "bash gh-switcher.sh guard uninstall"
+    "uninstall-hook": "bash gh-switcher.sh guard uninstall",
+    "install-dev-hooks": "./scripts/install-dev-hooks.sh",
+    "precommit": "npm run lint && npm test"
   },
   "keywords": [
     "github",

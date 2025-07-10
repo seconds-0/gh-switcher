@@ -34,9 +34,10 @@ teardown() {
 
 @test "ghs switch changes git config to selected user" {
     # Given – two users
-    add_user "alice" >/dev/null 2>&1
-    add_user "bob"   >/dev/null 2>&1
+    cmd_add "alice" >/dev/null 2>&1
+    cmd_add "bob"   >/dev/null 2>&1
 
+    setup_complex_git_scenario
     cd "$TEST_MAIN_REPO"
 
     # When – switch to user #2 (bob)

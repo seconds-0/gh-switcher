@@ -25,9 +25,9 @@ create_test_ssh_key() {
             ;;
     esac
     
-    # Ensure correct permissions
-    chmod 600 "$key_path" 2>/dev/null
-    chmod 644 "$key_path.pub" 2>/dev/null
+    # Ensure correct permissions (force even if owned by current user)
+    chmod 600 "$key_path" || true
+    chmod 644 "$key_path.pub" || true
     
     echo "$key_path"
 }

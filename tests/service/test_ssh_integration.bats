@@ -93,12 +93,13 @@ teardown() {
     
     # Then
     assert_failure
-    assert_output_contains "directory traversal detected"
+    assert_output_contains "suspicious patterns"
 }
 
 # Test SSH configuration application
 @test "apply_ssh_config sets git SSH command" {
     # Given
+    setup_complex_git_scenario
     cd "$TEST_MAIN_REPO"
     local ssh_key="$TEST_ED25519_KEY"
     
@@ -113,6 +114,7 @@ teardown() {
 
 @test "apply_ssh_config removes SSH config when empty path" {
     # Given
+    setup_complex_git_scenario
     cd "$TEST_MAIN_REPO"
     git config core.sshCommand "ssh -i /some/key"
     
@@ -160,7 +162,7 @@ teardown() {
 # Test profile SSH integration
 @test "create_user_profile stores SSH key path" {
     # When
-    run create_user_profile "testuser" "Test User" "test@example.com" "false" "$TEST_ED25519_KEY"
+    run profile_create "testuser" "Test User" "test@example.com" "$TEST_ED25519_KEY"
     
     # Then
     assert_success
@@ -169,7 +171,7 @@ teardown() {
 
 @test "create_user_profile works without SSH key" {
     # When
-    run create_user_profile "testuser" "Test User" "test@example.com" "false" ""
+    run profile_create "testuser" "Test User" "test@example.com" ""
     
     # Then
     assert_success
@@ -178,11 +180,12 @@ teardown() {
 
 @test "apply_user_profile applies SSH configuration" {
     # Given - ensure we're in a git repository
+    setup_complex_git_scenario
     cd "$TEST_MAIN_REPO"
-    create_user_profile "testuser" "Test User" "test@example.com" "false" "$TEST_ED25519_KEY" >/dev/null 2>&1
+    profile_create "testuser" "Test User" "test@example.com" "$TEST_ED25519_KEY" >/dev/null 2>&1
     
     # When
-    run apply_user_profile "testuser" "local"
+    run profile_apply "testuser" "local"
     
     # Then
     assert_success
@@ -194,11 +197,12 @@ teardown() {
 
 @test "apply_user_profile handles missing SSH key gracefully" {
     # Given - ensure we're in a git repository
+    setup_complex_git_scenario
     cd "$TEST_MAIN_REPO"
-    create_user_profile "testuser" "Test User" "test@example.com" "false" "" >/dev/null 2>&1
+    profile_create "testuser" "Test User" "test@example.com" "" >/dev/null 2>&1
     
     # When
-    run apply_user_profile "testuser" "local"
+    run profile_apply "testuser" "local"
     
     # Then - should work fine with HTTPS profile
     assert_success
@@ -213,7 +217,7 @@ teardown() {
     local key_path="$TEST_WRONG_PERMS_KEY"
     
     # When - create profile (may leave permissions unchanged)
-    run create_user_profile "testuser" "Test User" "test@example.com" "false" "$key_path"
+    run profile_create "testuser" "Test User" "test@example.com" "$key_path"
     assert_success
 
     # Now validate and fix permissions explicitly

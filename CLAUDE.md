@@ -1,372 +1,294 @@
-# CLAUDE.md - Build and Development Guide
+# gh-switcher (ghs) - Development Guide
 
-## Project Overview
-gh-switcher (`ghs`) is a lightning-fast, scriptable GitHub account switcher for developers with multiple GitHub identities. This is a Bash-based CLI tool focused exclusively on GitHub authentication context switching.
+## What It Is
+Lightning-fast GitHub account switcher for developers with multiple identities. Switch GitHub contexts, manage SSH keys, and prevent wrong-account commits - all in <100ms.
 
-## Project Philosophy
-- **CLI-first**: Commands must work perfectly in scripts and automation
-- **Simple over complex**: Resist feature creep and over-engineering  
-- **Automation-friendly**: Every feature supports non-interactive use
-- **Project-aware**: Context-sensitive behavior based on git repository
-- **Resist scope-creep**: GitHub account switching only, not generic git tools
+## Core Features
+- **Account switching**: `ghs switch <user>` - Switch GitHub CLI auth
+- **SSH key management**: Auto-detect, validate, and fix permissions
+- **Guard hooks**: Prevent commits with wrong GitHub account
+- **Project assignment**: Auto-switch accounts by directory
 
-### Implementation Guidelines
-- **Function size**: <50 lines preferred for Bash functions
-- **Test approach**: Unit tests + ≥1 higher layer (not exhaustive coverage)
-- **Feature scope**: Minimal viable implementation first
-- **Pattern matching**: Follow existing command patterns (cmd_switch, cmd_add, etc.)
-- **Anti-patterns**: Avoid over-engineering, enterprise patterns, interactive TUIs
+## Essential Commands
 
-## Build Commands
-
-### Essential Commands
-```bash
-# Lint the main script
-npm run lint
-
-# Run all tests
-npm test
-
-# Quick CI check (recommended before commits)
-npm run ci-check
-
-# Comprehensive local CI simulation
-npm run ci-test
-
-# Install globally (adds to ~/.zshrc)
-npm run install-global
-
-# Install guard hooks for account validation  
-ghs guard install
-```
-
-### Development Workflow
+### For Development
 ```bash
 # Before making changes
-npm run ci-check
+npm run ci-check          # Full CI simulation
 
-# After making changes
-npm run lint
-npm test
+# During development  
+npm run lint              # ShellCheck validation
+npm test                  # Run all BATS tests
 
-# MANDATORY before every commit (blocks commit if fails)
-npm run lint
-npm test
+# Before committing (MANDATORY)
+npm run lint && npm test  # Must both pass
 
-# Before committing
-npm run ci-check
+# Install developer pre-commit hooks
+npm run install-dev-hooks # Auto-run lint/tests before commits
 
-# Development convenience scripts (use ghs commands directly for user features)
-npm run install-hook    # Development shortcut for: ghs guard install
-npm run uninstall-hook  # Development shortcut for: ghs guard uninstall
+# Install globally
+npm run install-global    # Adds ghs to ~/.zshrc
 ```
 
-## Testing (BATS-first)
-
-### Framework & Structure
-- **Primary**: bats-core 1.10+ (Vitest only with maintainer approval)
-- **Layout**: `tests/unit/` (fast) and `tests/integration/` (CLI workflows)
-- **Approach**: Unit tests + ≥1 higher layer per feature (not exhaustive coverage)
-- **Performance**: <5s per BATS file on ubuntu-latest runners
-
-### Test Environment
-- Every BATS file loads `helpers/test_helper` and sets up isolated `$TEST_HOME`
-- No network calls - mock GitHub API via stub
-- Tag slow specs with `@slow` for nightly CI
-- Structure helpers under `tests/helpers/` to avoid duplication
-
-### Quality Standards
-- **100% Test Execution**: Every detected test MUST execute
-- **Zero Failures**: All tests must pass, no exceptions
-- **Legitimate Skips Only**: Only skip for missing external dependencies (e.g., `gpg`)
-- **Root Cause Fixes**: Never work around test failures
-
-## Quality Standards
-
-### Performance Requirements
-- **CLI commands**: <100ms completion time
-- **Guard hooks**: <300ms execution time
-- **BATS files**: <5s per file on ubuntu-latest runners
-
-### Code Quality
-- **ShellCheck**: Compliance with exclusions: SC1091, SC2155, SC2181
-- **Error handling**: All functions use the template format
-- **Data safety**: Atomic file operations with temp files
-- **Input validation**: Sanitize all user input
-- **Base64**: Single-line output only (use `tr -d '\n'` or `base64 --wrap=0`)
-
-### Data Safety Rules
-- Use atomic file operations with temp files
-- Profile format versioning for migrations
-- Backup and recovery for corrupted profiles
-- Base64 encoding for special characters in profiles
-
-## Development Guidelines
-
-### Always Rules
-- **Data Safety**: Atomic operations, no data loss
-- **Performance**: <100ms command completion (guard hooks <300ms execution)
-- **Security**: SSH key validation, input sanitization
-- **Non-Interactive**: All commands work in scripts/automation
-
-### Anti-Patterns to Avoid
-- **Over-engineering**: Complex solutions for simple problems
-- **Function bloat**: >50 lines per Bash function
-- **Test explosion**: Creating 3:1 test-to-code ratios
-- **Enterprise patterns**: Applied to simple CLI tool
-- **Interactive TUIs**: Main-menu interfaces
-- **Scope creep**: Non-GitHub account features
-- **Hard-coded paths**: Absolute paths or unscoped temp files
-
-### Guard Hooks (Account Validation)
-The project includes guard hooks that validate GitHub account and git profile before commits to prevent wrong-account commits.
-
-#### Installation & Usage
+### For Users
 ```bash
-# Install guard hooks for current repository
-ghs guard install
+# Basic usage
+ghs                       # Show current user and status
+ghs switch <user>         # Switch GitHub account
+ghs add <username>        # Add new GitHub user
+ghs remove <username>     # Remove a user
+ghs users                 # List all configured users
 
-# Check guard status and validation state
-ghs guard status  
+# Guard hooks (prevent wrong-account commits)
+ghs guard install         # Install pre-commit validation
+ghs guard status          # Check protection status
+ghs guard test            # Test validation without committing
+ghs guard uninstall       # Remove protection
 
-# Test validation without installing
-ghs guard test
-
-# Remove guard hooks
-ghs guard uninstall
+# Project assignment
+ghs assign <user>         # Assign user to current directory
 ```
 
-#### What it validates
-- **GitHub account**: Checks if current GitHub user matches project assignment
-- **Git config**: Ensures git name and email are configured
-- **Profile matching**: Warns if git config doesn't match user profile
+## Development Principles
 
-#### Normal Usage
+### Quality Gates (ALL must pass)
+- ✅ Tests: 100% execution, zero failures
+- ✅ ShellCheck: Clean (allowed: SC1091, SC2155, SC2181)  
+- ✅ Functions: ~50 lines (guideline for clarity)
+- ✅ Performance: <100ms commands, <300ms hooks
+- ✅ Root causes: No workarounds or test modifications
+
+### Before Starting Any Task
+Ask yourself:
+1. Can I explain this in one sentence?
+2. Will users notice and care?
+3. Am I solving the actual problem?
+
+### Red Flags - Stop and Rethink
+- Changing tests instead of fixing code
+- "It mostly works" or "good enough"
+- Complex solution to simple problem  
+- Can't debug the issue in 15 minutes
+
+### When Tests Fail
+**RULE**: Fix the code, never the test
+1. First 15 min: Debug to understand why
+2. Next 15 min: Fix the root cause
+3. Can't fix in 30 min? Stop and document the blocker
+
+## Code Standards
+
+### Shell Patterns
 ```bash
-# Setup protection for a project
-ghs assign 2              # Assign user to project
-ghs guard install         # Install validation hooks
-git commit -m "message"   # Automatic validation
+# Function template - ALL functions must follow this pattern
+cmd_example() {
+    local arg="${1:-}"
+    [[ -z "$arg" ]] && { echo "❌ Missing argument" >&2; return 1; }
+    
+    # Core logic here
+    
+    echo "✅ Success"
+    return 0
+}
 
-# Check status anytime
-ghs guard status          # See protection status
-ghs                       # Dashboard also shows guard status
-```
+# Loading configuration safely
+load_users() {
+    [[ -f "$GH_USERS_FILE" ]] || return 0
+    while IFS= read -r username || [[ -n "$username" ]]; do
+        [[ -z "$username" ]] && continue
+        echo "$username"
+    done < "$GH_USERS_FILE"
+}
 
-#### Override when needed
-```bash
-# Bypass validation (not recommended)
-GHS_SKIP_HOOK=1 git commit -m "your message"
-```
+# Profile parsing (v3 format)
+parse_profile_line() {
+    local line="$1"
+    IFS='|' read -r username version name email ssh_key <<< "$line"
+    [[ "$version" == "v3" ]] || return 1
+    echo "$username|$name|$email|$ssh_key"
+}
 
-#### Guard Hook Behavior
-- **Fails commit** if GitHub account doesn't match project assignment
-- **Fails commit** if git config is incomplete (missing name/email)
-- **Warns but allows** if git config doesn't match profile
-- **Skips validation** if GitHub CLI not authenticated
-- **Provides guidance** on how to fix issues
-- **Backs up existing hooks** during installation
-
-### Code Patterns & Error Handling
-All functions should follow this template pattern:
-
-```bash
-some_action() {
-    local arg="$1"
-    if [[ -z "$arg" ]]; then
-        printf '❌ Missing argument\n' >&2
-        return 1
-    fi
-    # …logic…
-    printf '✅ Done\n'
+# Atomic file write pattern
+save_to_file_atomic() {
+    local file="$1"
+    local content="$2"
+    local temp_file
+    temp_file=$(mktemp "${file}.XXXXXX") || return 1
+    
+    echo "$content" > "$temp_file" || { rm -f "$temp_file"; return 1; }
+    mv -f "$temp_file" "$file" || { rm -f "$temp_file"; return 1; }
 }
 ```
 
-**Key principles:**
-- Quote every variable: `"$var"` – never bare expansions
-- Prefer `[[ ]]` for conditionals; supply defaults `${VAR:-fallback}`
-- Exit early with meaningful status codes
-- Use feedback icons: ✅ success, ⚠️ warning, ❌ error, 💡 tip
-- Name helpers with action verbs (`load_users`, `save_mapping`)
-- Validate all inputs before processing
-- Avoid `2>/dev/null` - use proper error handling
+### Error Handling
+- Always quote variables: `"$var"`
+- Use `[[ ]]` for conditionals
+- Exit early with meaningful errors
+- Icons: ✅ success, ⚠️ warning, ❌ error, 💡 tip
+- NEVER use `A && B || C` pattern - use if/then/else
 
-### Testing Requirements
-- **New features**: Unit tests + ≥1 higher layer (not exhaustive coverage)
-- **Test focus**: User workflows over implementation details
-- **Realistic scenarios**: Avoid edge cases and over-engineering
-- **ZERO TOLERANCE**: All tests must pass, no exceptions
-- **Skips only**: For missing external dependencies (e.g., `gpg` binary)
-- **Debugging**: Research → isolate → fix root cause (no workarounds)
+### File Safety
+- Atomic operations with temp files
+- Profile format: `username|v3|name|email|ssh_key`
+- Validate input before processing
+- Check file exists before reading: `[[ -f "$file" ]] || return 0`
 
-### Test Debugging Methodology
-When tests fail, follow this systematic approach:
+## Testing
 
-1. **Research First**: Use documentation (BATS docs, official tool docs) to understand expected behavior before guessing
-2. **Systematic Isolation**: Simplify failing test to minimal case, rebuild incrementally  
-3. **Exact Output Matching**: Use BATS debug output to see actual vs expected:
-   ```bash
-   @test "example test" {
-       run some_command
-       echo "Debug: $output" >&3
-       echo "Debug status: $status" >&3
-       [ "$status" -eq 0 ]
-   }
-   ```
-4. **Fix Root Cause**: Never work around test failures; fix the underlying issue completely
+### Test Structure
+```
+tests/
+├── unit/          # Fast, isolated function tests
+├── integration/   # End-to-end workflows
+└── helpers/       # Shared test utilities
+```
 
-### Debug Output Usage
-- Use `echo "Debug: $output" >&3` to see actual command output
-- Use `echo "Debug status: $status" >&3` to see exit codes
-- Use `echo "Debug lines: ${lines[*]}" >&3` to see output as array
-- Run tests with `bats -t tests/unit/test_file.bats` for tap output
+### BATS Test Format
+```bash
+#!/usr/bin/env bats
+
+load '../helpers/test_helper'
+
+setup() {
+    setup_test_environment
+    # Test-specific setup
+}
+
+teardown() {
+    cleanup_test_environment
+}
+
+@test "descriptive test name" {
+    # Arrange
+    local input="test"
+    
+    # Act
+    run cmd_example "$input"
+    
+    # Assert
+    assert_success
+    assert_output "✅ Success"
+}
+
+@test "error case handling" {
+    run cmd_example ""
+    assert_failure
+    assert_output "❌ Missing argument"
+}
+
+# For debugging test failures
+@test "debug example" {
+    run some_command
+    echo "Debug output: $output" >&3
+    echo "Debug status: $status" >&3
+    echo "Debug lines: ${lines[*]}" >&3
+    assert_success
+}
+```
+
+### Common Test Patterns
+```bash
+# Setup mock GitHub CLI
+setup_mock_gh_user() {
+    local username="$1"
+    cat > "$TEST_HOME/gh" << EOF
+#!/bin/bash
+if [[ "\$1 \$2 \$3 \$4" == "api user -q .login" ]]; then
+    echo "$username"
+fi
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+}
+
+# Test file operations
+create_test_file() {
+    local file="$1"
+    local content="$2"
+    echo "$content" > "$file"
+}
+
+# Assert helpers (from test_helper)
+assert_success      # status = 0
+assert_failure      # status != 0
+assert_output "text"  # exact match
+assert_output_contains "partial"  # substring match
+```
+
+### Performance Requirements
+- Commands: <100ms execution
+- Guard hooks: <300ms execution  
+- Test files: <5s per file on CI
+
+## Common Issues
+
+### Guard Hook Tests
+- Test in isolated environment with proper PATH setup
+- Mock `gh` CLI for predictable behavior
+- Verify hook can find `ghs` after installation
+
+### SSH Key Handling
+- Auto-fix permissions (600) on detection
+- Support absolute and tilde paths
+- Validate key exists before setting
+
+### Profile Migration
+- Handle v2→v3 format changes gracefully
+- Preserve user data during updates
+- Use pipe delimiter for extensibility
 
 ## File Structure
+- `gh-switcher.sh` - Main script (~1000 lines)
+- `~/.gh-users` - User list (one per line)
+- `~/.gh-user-profiles` - Enhanced profiles (v3 format)
+- `~/.gh-project-accounts` - Project→user mapping
 
-### Core Files
-- `gh-switcher.sh` - Main executable (2000+ lines)
-- `package.json` - npm configuration and scripts
-- `tests/` - Comprehensive test suite with BATS framework
+## Development Philosophy
 
-### Configuration Files
-- `~/.gh-users` - List of usernames (one per line)
-- `~/.gh-user-profiles` - Enhanced profile data (v3 format)
-- `~/.gh-project-accounts` - Project to account mapping
+### User Delight First
+Every line of code must earn its keep by delivering user value.
 
-### Documentation
-- `Documentation/Plans/` - Workplan files with structured format
-- `Documentation/Plans/archive/` - Completed workplans
-- `docs/ROADMAP.md` - Project roadmap
+#### When to Add Code
+✅ Features that spark joy (SSH auto-fix magic)  
+✅ Features that prevent frustration (guard hooks)  
+❌ Features that "might be useful someday"
 
-## CI/CD Pipeline
+#### When to Refactor
+- Function approaching 50 lines? Split only if it improves clarity
+- Can't understand code you wrote 3 months ago? Simplify
+- Performance regression? Fix immediately
 
-### GitHub Actions
-- Matrix testing: Ubuntu and macOS
-- Node.js 18 support
-- ShellCheck linting
-- BATS testing framework
-- Sequence: lint → test → build
+### Performance IS a Feature
+- <50ms feels instant = delight
+- <100ms feels fast = acceptable
+- >100ms feels broken = fix it
 
-### Pre-commit Checks
-Use `npm run ci-check` before pushing to ensure:
-- ShellCheck linting passes
-- All tests pass in CI mode
-- Bash compatibility verified
-- Temporary files cleaned
+### Anti-Patterns to Avoid
+- Over-engineering simple problems
+- Test-driven design (code-first, then test)
+- Enterprise patterns in a CLI tool
+- Interactive TUIs when CLI works fine
 
-## Pull Request Creation Process
-
-### Step 1: Create PR Body File
-Create a temporary markdown file with the PR description:
+## Pull Request Process
 ```bash
-# Create PR body file
+# Create PR body
 cat > /tmp/pr-body.md << 'EOF'
 ## Summary
-- Brief bullet points of changes
-
-## Features Added
-- List of new features
+- What changed
 
 ## Test Results
-- Test coverage and results
+- All tests pass
+- Performance validated
 
 🤖 Generated with [Claude Code](https://claude.ai/code)
 EOF
-```
 
-### Step 2: Create PR
-```bash
-gh pr create --title "feat: feature description" --body-file /tmp/pr-body.md
-```
+# Create PR
+gh pr create --title "feat: description" --body-file /tmp/pr-body.md
 
-### Step 3: Cleanup
-```bash
+# Cleanup
 rm /tmp/pr-body.md
 ```
 
-## Workplan Format
-
-Based on existing Documentation/Plans files, use this structure:
-
-```markdown
-# TASK-TYPE-Name - Brief Description
-
-## Task ID
-TASK-TYPE-Name
-
-## Problem Statement
-Clear description of the issue or feature need
-
-## Proposed Solution
-High-level approach to solving the problem
-
-## Implementation Details
-Technical details and approach
-
-## Implementation Checklist
-### Phase 1: Description
-- [x] Completed item
-- [ ] Pending item
-
-### Phase 2: Description
-- [ ] More items
-
-## Testing Plan
-1. Test scenario 1
-2. Test scenario 2
-
-## Status
-Current status (Not Started/In Progress/Completed/Phases X-Y Completed)
-
-## Notes
-Additional context or considerations
-```
-
-### Task Management Process
-1. Create workplan in `Documentation/Plans/`
-2. Use clear task IDs (e.g., FEAT-DirectoryAutoSwitch, BUGFIX-ProfileReliability)
-3. Track progress with checkboxes in Implementation Checklist
-4. Move completed plans to `Documentation/Plans/archive/`
-5. Update Status section as work progresses
-
-## Performance Monitoring
-
-### Performance Target
-- End-to-end CLI commands should finish in **<100ms** on typical `ubuntu-latest` runner (cold start)
-- Optimize for minimal external calls
-- Measure command execution times during development
-
-### Performance Testing
-```bash
-# Time a command
-time ghs switch 1
-
-# Profile multiple runs
-for i in {1..5}; do
-    echo "Run $i:"
-    time ghs users
-done
-
-# Add timing to functions for debugging
-debug_timer() {
-    local start_time=$(date +%s%N)
-    "$@"
-    local end_time=$(date +%s%N)
-    local duration=$(( (end_time - start_time) / 1000000 ))
-    echo "Debug: $* took ${duration}ms" >&2
-}
-```
-
-### Performance Considerations
-- Cache results where possible (git config detection, user profiles)
-- Minimize `gh` API calls
-- Use efficient file operations
-- Test with large numbers of profiles
-- Profile slow operations and optimize
-
-## Security Considerations
-- SSH key validation and integration
-- GPG key support for commit signing
-- Input validation for all user data
-- No hardcoded paths or credentials
-- Secure temporary file handling
+## Development Wisdom
+- Practice defensive programming when reasonable, but dont succumb to overengineering
