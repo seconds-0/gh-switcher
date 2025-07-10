@@ -23,6 +23,9 @@ npm test                  # Run all BATS tests
 # Before committing (MANDATORY)
 npm run lint && npm test  # Must both pass
 
+# Install developer pre-commit hooks
+npm run install-dev-hooks # Auto-run lint/tests before commits
+
 # Install globally
 npm run install-global    # Adds ghs to ~/.zshrc
 ```
