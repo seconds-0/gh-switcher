@@ -142,7 +142,21 @@ git config --global core.sshCommand "ssh -i ~/.ssh/id_rsa_work -o IdentitiesOnly
 
 ## Status
 
-Not Started
+Partially Implemented
+
+### Completed ✅
+- Profile SSH key storage
+- SSH key validation (file exists, permissions)
+- SSH key path in profiles (v3 format)
+- Auto-detection of alternative SSH keys
+- Permission checking and fix suggestions
+- SSH configuration via core.sshCommand
+- Integration with add/edit/switch commands
+
+### Remaining ❌
+- SSH authentication testing with GitHub
+- SSH key caching for performance
+- See IMPLEMENTATION-SSH-Testing.md for completion plan
 
 ## Notes
 
