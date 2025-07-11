@@ -195,3 +195,49 @@ teardown() {
     assert_output_not_contains "Possible typo"
     assert_output_contains "No issues detected"
 }
+
+@test "complete first-time user flow with current" {
+    # Given - mock gh authenticated as newuser
+    cat > "$TEST_HOME/gh" << 'EOF'
+#!/bin/bash
+if [[ "$1 $2 $3 $4" == "api user -q .login" ]]; then
+    echo "newuser"
+    exit 0
+fi
+exit 1
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+    
+    # Create a test git repo for switching
+    mkdir -p "$TEST_HOME/project"
+    cd "$TEST_HOME/project"
+    git init >/dev/null 2>&1
+    
+    # When - First time user flow
+    # 1. Add current user
+    run ghs add current
+    assert_success
+    assert_output_contains "Found current user: newuser"
+    assert_output_contains "Added newuser"
+    
+    # 2. Verify user was added
+    run ghs users
+    assert_success
+    assert_output_contains "newuser"
+    
+    # 3. Switch to the user
+    run ghs switch newuser
+    assert_success
+    assert_output_contains "Switched to user: newuser"
+    
+    # 4. Verify git config was set
+    run git config user.name
+    assert_success
+    [[ "$output" == "newuser" ]]
+    
+    # 5. Verify status shows correct user
+    run ghs status
+    assert_success
+    assert_output_contains "Current project: project"
+}

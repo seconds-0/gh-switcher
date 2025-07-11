@@ -20,6 +20,147 @@ teardown() {
 }
 
 # Test basic user addition
+@test "add current user when authenticated" {
+    # Given - mock gh to return current user
+    cat > "$TEST_HOME/gh" << 'EOF'
+#!/bin/bash
+if [[ "$1 $2 $3 $4" == "api user -q .login" ]]; then
+    echo "alice"
+    exit 0
+fi
+exit 1
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+    
+    # When
+    run cmd_add "current"
+    
+    # Then
+    assert_success
+    assert_output_contains "Found current user: alice"
+    assert_output_contains "Added alice to user list"
+    assert_user_exists "alice"
+}
+
+@test "add current fails when not authenticated" {
+    # Given - mock gh to simulate not authenticated
+    cat > "$TEST_HOME/gh" << 'EOF'
+#!/bin/bash
+echo "error: not authenticated" >&2
+exit 1
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+    
+    # When
+    run cmd_add "current"
+    
+    # Then
+    assert_failure
+    assert_output_contains "Not authenticated with GitHub CLI"
+    assert_output_contains "Run: gh auth login"
+}
+
+@test "add current handles existing user gracefully" {
+    # Given - existing user and mock gh
+    echo "alice" >> "$GH_USERS_CONFIG"
+    cat > "$TEST_HOME/gh" << 'EOF'
+#!/bin/bash
+if [[ "$1 $2 $3 $4" == "api user -q .login" ]]; then
+    echo "alice"
+    exit 0
+fi
+exit 1
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+    
+    # When
+    run cmd_add "current"
+    
+    # Then
+    assert_success
+    assert_output_contains "Found current user: alice"
+    assert_output_contains "User alice already exists"
+}
+
+@test "add current with SSH key" {
+    # Given
+    local ssh_key="$TEST_ED25519_KEY"
+    cat > "$TEST_HOME/gh" << 'EOF'
+#!/bin/bash
+if [[ "$1 $2 $3 $4" == "api user -q .login" ]]; then
+    echo "bob"
+    exit 0
+fi
+exit 1
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+    
+    # Mock SSH authentication
+    cat > "$TEST_HOME/ssh" << 'EOF'
+#!/bin/bash
+if [[ "$*" =~ "-T git@github.com" ]]; then
+    echo "Hi bob! You've successfully authenticated" >&2
+    exit 1
+fi
+EOF
+    chmod +x "$TEST_HOME/ssh"
+    
+    # When
+    run cmd_add "current" --ssh-key "$ssh_key"
+    
+    # Then
+    assert_success
+    assert_output_contains "Found current user: bob"
+    assert_output_contains "SSH key authenticated successfully"
+    assert_output_contains "Added bob to user list"
+}
+
+@test "add current with enterprise host" {
+    # Given
+    cat > "$TEST_HOME/gh" << 'EOF'
+#!/bin/bash
+if [[ "$1 $2 $3 $4" == "api user -q .login" ]]; then
+    echo "work-alice"
+    exit 0
+fi
+exit 1
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+    
+    # When
+    run cmd_add "current" --host github.company.com
+    
+    # Then
+    assert_success
+    assert_output_contains "Found current user: work-alice"
+    assert_output_contains "Host: github.company.com"
+    assert_output_contains "Added work-alice to user list"
+}
+
+@test "add current handles network error" {
+    # Given - mock gh to simulate network error
+    cat > "$TEST_HOME/gh" << 'EOF'
+#!/bin/bash
+echo "error: Network timeout" >&2
+exit 1
+EOF
+    chmod +x "$TEST_HOME/gh"
+    export PATH="$TEST_HOME:$PATH"
+    
+    # When
+    run cmd_add "current"
+    
+    # Then
+    assert_failure
+    assert_output_contains "Failed to get current GitHub user"
+    assert_output_contains "Error: error: Network timeout"
+}
+
 @test "add_user creates user without SSH key" {
     # When
     run cmd_add "testuser"
@@ -133,7 +274,7 @@ EOF
     
     # Then
     assert_failure
-    assert_output_contains "Usage: ghs add-user"
+    assert_output_contains "Usage: ghs add"
     assert_output_contains "--ssh-key"
 }
 

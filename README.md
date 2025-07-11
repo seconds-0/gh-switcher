@@ -35,19 +35,25 @@ source ~/.zshrc
 ## Quick Start
 
 ```bash
-# Add your GitHub accounts
-ghs add-user alice --name "Alice Smith" --email "alice@work.com"
-ghs add-user bob --name "Bob Jones" --email "bob@personal.com"
+# 1. Authenticate with GitHub CLI (if not already done)
+gh auth login
+
+# 2. Add your current GitHub account
+ghs add current
+
+# 3. You're ready to go!
+ghs             # Shows current status
+
+# Add more accounts as needed
+ghs add alice --name "Alice Smith" --email "alice@work.com"
+ghs add work --host github.company.com  # Enterprise account
 
 # Switch between accounts by number
-ghs switch 1    # Switch to alice
-ghs switch 2    # Switch to bob
+ghs switch 1    # Switch to first account
+ghs switch 2    # Switch to second account
 
 # Assign account to current project
-ghs assign 1    # Use alice for this project
-
-# View dashboard
-ghs             # Shows current status and quick actions
+ghs assign 1    # Use account 1 for this project
 ```
 
 ## Commands
@@ -60,11 +66,12 @@ ghs             # Shows current status and quick actions
 
 ### User Management
 
-- `ghs add-user <username>` - Add user with profile fields
-- `ghs add-user current` - Add currently authenticated GitHub user
-- `ghs add-user <user> --name "Name" --email "email@domain" --gpg <key> --auto-sign true --force`
+- `ghs add <username|current>` - Add a new GitHub user
+- `ghs add current` - Add currently authenticated GitHub user
+- `ghs add <user> --ssh-key <path>` - Add user with SSH key
+- `ghs add <user> --host github.company.com` - Add enterprise user
 - `ghs users` - Show numbered list of users
-- `ghs remove-user <user>` - Remove user by name or number
+- `ghs remove <user>` - Remove user by name or number
 - `ghs profiles` - Show user profiles (add `--verbose` for detailed view)
 - `ghs update <user> <field> "<value>"` - Update profile field (name, email, gpg)
 - `ghs validate [user]` - Run profile validation check

@@ -1128,7 +1128,7 @@ cmd_add() {
             --host) host="$2"; shift 2 ;;
             *)         
                 echo "❌ Unknown option: $1" >&2
-                echo "Usage: ghs add-user <username> [--ssh-key <path>] [--host <github.com|github.enterprise.com>]" >&2
+                echo "Usage: ghs add <username|current> [--ssh-key <path>] [--host <github.com|github.enterprise.com>]" >&2
                 return 1
                 ;;
         esac
@@ -1137,8 +1137,27 @@ cmd_add() {
     # Validate input
     if [[ -z "$username" ]]; then
         echo "❌ Username required" >&2
-        echo "Usage: ghs add-user <username> [--ssh-key <path>] [--host <github.com|github.enterprise.com>]" >&2
+        echo "Usage: ghs add <username|current> [--ssh-key <path>] [--host <github.com|github.enterprise.com>]" >&2
         return 1
+    fi
+    
+    # Handle 'current' - get authenticated GitHub user
+    if [[ "$username" == "current" ]]; then
+        local gh_output gh_error
+        if gh_output=$(gh api user -q .login 2>&1); then
+            username="$gh_output"
+            echo "✅ Found current user: $username"
+        else
+            gh_error="$gh_output"
+            if [[ "$gh_error" =~ "not authenticated" ]] || [[ "$gh_error" =~ "No authenticated" ]]; then
+                echo "❌ Not authenticated with GitHub CLI" >&2
+                echo "   Run: gh auth login" >&2
+            else
+                echo "❌ Failed to get current GitHub user" >&2
+                echo "   Error: $gh_error" >&2
+            fi
+            return 1
+        fi
     fi
     
     if ! validate_username "$username"; then
@@ -1976,26 +1995,27 @@ USAGE:
   ghs <command> [options]
 
 COMMANDS:
-  add <username>        Add a new user
-  remove <user>         Remove user by name or ID
-  switch <user>         Switch to user by name or ID
-  assign <user>         Assign user to current project
-  users                 List all configured users
-  show <user>           Show profile details       [NEW]
-  edit <user>           Edit profile settings      [NEW]
-  test-ssh [<user>]     Test SSH authentication    [NEW]
-  status                Show current project status
-  guard <subcommand>    Manage guard hooks for account validation
-  help                  Show this help
+  add <username|current>  Add a new user (use 'current' for authenticated user)
+  remove <user>           Remove user by name or ID
+  switch <user>           Switch to user by name or ID
+  assign <user>           Assign user to current project
+  users                   List all configured users
+  show <user>             Show profile details       [NEW]
+  edit <user>             Edit profile settings      [NEW]
+  test-ssh [<user>]       Test SSH authentication    [NEW]
+  status                  Show current project status
+  guard <subcommand>      Manage guard hooks for account validation
+  help                    Show this help
 
 OPTIONS:
   --ssh-key <path>      Specify SSH key for add command
   --host <domain>       Specify GitHub host (default: github.com)
 
 EXAMPLES:
-  ghs add alice
-  ghs add bob --ssh-key ~/.ssh/id_rsa_work
-  ghs add work --host github.company.com
+  ghs add current                             Add currently authenticated GitHub user
+  ghs add alice                               Add specific user  
+  ghs add bob --ssh-key ~/.ssh/id_rsa_work    Add user with SSH key
+  ghs add work --host github.company.com      Add enterprise user
   ghs edit alice --host github.enterprise.com
   ghs switch 1
   ghs assign alice
