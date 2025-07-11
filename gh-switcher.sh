@@ -1143,7 +1143,7 @@ cmd_add() {
     
     # Handle 'current' - get authenticated GitHub user
     if [[ "$username" == "current" ]]; then
-        username=$(gh api user -q .login 2>&1) || {
+        username=$(gh api user -q .login) || {
             echo "❌ Not authenticated with GitHub CLI" >&2
             echo "   Run: gh auth login" >&2
             return 1
@@ -1767,7 +1767,7 @@ cmd_status() {
         echo "GitHub account switcher for developers"
         echo
         echo "📝 Quick start:"
-        echo "  ghs add <username>           # Add by GitHub username"
+        echo "  ghs add current              # Add currently authenticated GitHub user"
         echo "  ghs add work                 # Add another GitHub account"
         echo "  ghs add bob --ssh-key ~/.ssh/id_rsa_work  # Add with SSH key"
         echo
