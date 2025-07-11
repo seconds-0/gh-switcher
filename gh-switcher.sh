@@ -1143,21 +1143,12 @@ cmd_add() {
     
     # Handle 'current' - get authenticated GitHub user
     if [[ "$username" == "current" ]]; then
-        local gh_output gh_error
-        if gh_output=$(gh api user -q .login 2>&1); then
-            username="$gh_output"
-            echo "✅ Found current user: $username"
-        else
-            gh_error="$gh_output"
-            if [[ "$gh_error" =~ "not authenticated" ]] || [[ "$gh_error" =~ "No authenticated" ]]; then
-                echo "❌ Not authenticated with GitHub CLI" >&2
-                echo "   Run: gh auth login" >&2
-            else
-                echo "❌ Failed to get current GitHub user" >&2
-                echo "   Error: $gh_error" >&2
-            fi
+        username=$(gh api user -q .login 2>&1) || {
+            echo "❌ Not authenticated with GitHub CLI" >&2
+            echo "   Run: gh auth login" >&2
             return 1
-        fi
+        }
+        echo "✅ Found current user: $username"
     fi
     
     if ! validate_username "$username"; then
