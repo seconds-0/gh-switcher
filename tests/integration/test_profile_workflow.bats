@@ -241,3 +241,33 @@ EOF
     assert_success
     assert_output_contains "Current project: project"
 }
+
+@test "invalid commands don't corrupt terminal" {
+    # Test that previously problematic inputs don't blow up the terminal
+    # This is a regression test for the bug where 'ghs 1' nuked the terminal
+    
+    # Numeric input (the original bug)
+    run ghs 1
+    assert_failure
+    assert_output_contains "Unknown command"
+    
+    # Command injection attempt
+    run ghs "; echo hacked"
+    assert_failure
+    assert_output_contains "Unknown command"
+    
+    # Special characters that could mess up terminal
+    run ghs '$USER'
+    assert_failure
+    assert_output_contains "Unknown command"
+    
+    # Very long input
+    run ghs "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert_failure
+    assert_output_contains "Unknown command"
+    
+    # Empty after sanitization (emoji)
+    run ghs "🚀"
+    assert_failure
+    assert_output_contains "Unknown command"
+}
