@@ -67,26 +67,6 @@ EOF
     assert_output_contains "gh auth status --hostname github.company.com"
 }
 
-@test "v3 to v4 migration on edit" {
-    # Create v3 profile manually
-    echo "olduser|v3|Old User|old@example.com|~/.ssh/old" > "$GH_USER_PROFILES"
-    user_add "olduser"
-    
-    # Edit triggers migration
-    run ghs edit olduser --name "Updated User"
-    assert_success
-    
-    # Check migrated to v4
-    run cat "$GH_USER_PROFILES"
-    assert_output_contains "|v4|"
-    assert_output_contains "|github.com"
-    
-    # Verify still works
-    run profile_get "olduser"
-    assert_success
-    assert_output_contains "name:Updated User"
-    assert_output_contains "host:github.com"
-}
 
 @test "SSH testing respects host configuration" {
     # Create users for different hosts

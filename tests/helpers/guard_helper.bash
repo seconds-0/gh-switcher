@@ -70,7 +70,7 @@ setup_test_project_assignment() {
     
     # Also create a basic profile for the user if it doesn't exist
     if ! grep -q "^${username}|" "$GH_USER_PROFILES" 2>/dev/null; then
-        echo "${username}|v3|${username}|${username}@example.com|" >> "$GH_USER_PROFILES"
+        echo "${username}|v4|${username}|${username}@example.com||github.com" >> "$GH_USER_PROFILES"
     fi
 }
 

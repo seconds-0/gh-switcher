@@ -109,12 +109,12 @@ load_users() {
     done < "$GH_USERS_FILE"
 }
 
-# Profile parsing (v3 format)
+# Profile parsing (v4 format)
 parse_profile_line() {
     local line="$1"
-    IFS='|' read -r username version name email ssh_key <<< "$line"
-    [[ "$version" == "v3" ]] || return 1
-    echo "$username|$name|$email|$ssh_key"
+    IFS='|' read -r username version name email ssh_key host <<< "$line"
+    [[ "$version" == "v4" ]] || return 1
+    echo "$username|$name|$email|$ssh_key|$host"
 }
 
 # Atomic file write pattern
@@ -141,7 +141,7 @@ save_to_file_atomic() {
 
 ### File Safety
 - Atomic operations with temp files
-- Profile format: `username|v3|name|email|ssh_key`
+- Profile format: `username|v4|name|email|ssh_key|host`
 - Validate input before processing
 - Check file exists before reading: `[[ -f "$file" ]] || return 0`
 
@@ -244,15 +244,15 @@ assert_output_contains "partial"  # substring match
 - Support absolute and tilde paths
 - Validate key exists before setting
 
-### Profile Migration
-- Handle v2→v3 format changes gracefully
+### Profile Format
+- Only v4 format supported
 - Preserve user data during updates
 - Use pipe delimiter for extensibility
 
 ## File Structure
 - `gh-switcher.sh` - Main script (~1000 lines)
 - `~/.gh-users` - User list (one per line)
-- `~/.gh-user-profiles` - Enhanced profiles (v3 format)
+- `~/.gh-user-profiles` - Enhanced profiles (v4 format)
 - `~/.gh-project-accounts` - Project→user mapping
 
 ## Development Philosophy

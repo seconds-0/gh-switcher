@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Test profile I/O functionality with v3 pipe-delimited format
+# Test profile I/O functionality with v4 pipe-delimited format
 
 load '../helpers/test_helper'
 load '../helpers/ssh_helper'
@@ -63,9 +63,9 @@ teardown() {
     [ "$profile_line" = "testuser|v4|Test User|test@example.com|/path/to/key|github.com" ]
 }
 
-@test "profile_get retrieves v3 format correctly" {
+@test "profile_get retrieves v4 format correctly" {
     # Given
-    echo "testuser|v3|Test User|test@example.com|/path/to/key" > "$GH_USER_PROFILES"
+    echo "testuser|v4|Test User|test@example.com|/path/to/key|github.com" > "$GH_USER_PROFILES"
     
     # When
     run profile_get "testuser"
@@ -75,11 +75,12 @@ teardown() {
     assert_output_contains "name:Test User"
     assert_output_contains "email:test@example.com"
     assert_output_contains "ssh_key:/path/to/key"
+    assert_output_contains "host:github.com"
 }
 
 @test "profile_get handles missing SSH key" {
     # Given
-    echo "testuser|v3|Test User|test@example.com|" > "$GH_USER_PROFILES"
+    echo "testuser|v4|Test User|test@example.com||github.com" > "$GH_USER_PROFILES"
     
     # When
     run profile_get "testuser"
@@ -99,18 +100,16 @@ teardown() {
     assert_failure
 }
 
-@test "profile_get only supports v3 format" {
-    # Given - legacy v2 base64 encoded format
-    local encoded_name=$(echo -n "Test User" | base64)
-    local encoded_email=$(echo -n "test@example.com" | base64)
-    local encoded_ssh=$(echo -n "/path/to/key" | base64)
-    echo "testuser:2:$encoded_name:$encoded_email:$encoded_ssh" > "$GH_USER_PROFILES"
+@test "profile_get only supports v4 format" {
+    # Given - v3 format (no longer supported)
+    echo "testuser|v3|Test User|test@example.com|/path/to/key" > "$GH_USER_PROFILES"
     
     # When
     run profile_get "testuser"
     
-    # Then - should fail as v2 is not supported
+    # Then - should fail as v3 is not supported
     assert_failure
+    assert_output_contains "Unsupported profile version: v3"
 }
 
 @test "multiple profiles can coexist" {

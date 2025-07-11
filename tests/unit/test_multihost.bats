@@ -67,14 +67,6 @@ teardown() {
 # Profile Format Tests
 # =============================================================================
 
-@test "profile_get handles v3 format with default host" {
-    # Create v3 profile
-    echo "alice|v3|Alice|alice@example.com|~/.ssh/id_rsa" > "$GH_USER_PROFILES"
-    
-    run profile_get "alice"
-    assert_success
-    assert_output_contains "host:github.com"
-}
 
 @test "profile_get handles v4 format with custom host" {
     # Create v4 profile
@@ -266,32 +258,7 @@ EOF
 # Migration Tests
 # =============================================================================
 
-@test "v3 profiles continue to work after v4 implementation" {
-    # Create v3 profile manually
-    echo "olduser|v3|Old User|old@example.com|~/.ssh/old" > "$GH_USER_PROFILES"
-    
-    # Should still work
-    run profile_get "olduser"
-    assert_success
-    assert_output_contains "name:Old User"
-    assert_output_contains "email:old@example.com"
-    assert_output_contains "host:github.com"  # Default for v3
-}
 
-@test "mixed v3 and v4 profiles coexist" {
-    # Create mixed profiles
-    echo "v3user|v3|V3 User|v3@example.com|~/.ssh/v3" > "$GH_USER_PROFILES"
-    echo "v4user|v4|V4 User|v4@example.com|~/.ssh/v4|github.company.com" >> "$GH_USER_PROFILES"
-    
-    # Both should work
-    run profile_get "v3user"
-    assert_success
-    assert_output_contains "host:github.com"
-    
-    run profile_get "v4user"
-    assert_success
-    assert_output_contains "host:github.company.com"
-}
 
 # =============================================================================
 # Guard Hook Tests

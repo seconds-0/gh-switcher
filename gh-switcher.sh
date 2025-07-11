@@ -487,36 +487,22 @@ profile_get() {
     profile_line=$(grep "^${username}|" "$GH_USER_PROFILES" | head -1)
     [[ -n "$profile_line" ]] || return 1
     
-    # Detect version
-    local version
-    version=$(echo "$profile_line" | cut -d'|' -f2)
+    # Parse v4: username|v4|name|email|ssh_key|host
+    local name email ssh_key host
+    IFS='|' read -r _ _ name email ssh_key host <<< "$profile_line"
     
-    case "$version" in
-        v3)
-            # Parse v3: username|v3|name|email|ssh_key
-            local name email ssh_key
-            IFS='|' read -r _ _ name email ssh_key <<< "$profile_line"
-            
-            echo "name:$name"
-            echo "email:$email"
-            echo "ssh_key:$ssh_key"
-            echo "host:github.com"  # Default for v3
-            ;;
-        v4)
-            # Parse v4: username|v4|name|email|ssh_key|host
-            local name email ssh_key host
-            IFS='|' read -r _ _ name email ssh_key host <<< "$profile_line"
-            
-            echo "name:$name"
-            echo "email:$email"
-            echo "ssh_key:$ssh_key"
-            echo "host:${host:-github.com}"  # Fallback if empty
-            ;;
-        *)
-            echo "❌ Unknown profile version: $version" >&2
-            return 1
-            ;;
-    esac
+    # Validate it's v4 format
+    local version="${profile_line#*|}"
+    version="${version%%|*}"
+    if [[ "$version" != "v4" ]]; then
+        echo "❌ Unsupported profile version: $version (only v4 supported)" >&2
+        return 1
+    fi
+    
+    echo "name:$name"
+    echo "email:$email"
+    echo "ssh_key:$ssh_key"
+    echo "host:${host:-github.com}"  # Fallback if empty
 }
 
 # Apply profile to git config
