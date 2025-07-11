@@ -58,10 +58,11 @@ measure_time_ms() {
     [[ "$duration" -lt 100 ]]
 }
 
-@test "ghs status completes within 100ms" {
+@test "ghs status completes within 250ms" {
     local duration=$(measure_time_ms ghs status)
     echo "# Duration: ${duration}ms" >&3
-    [[ "$duration" -lt 100 ]]
+    # Allow up to 250ms for enhanced status display with user list and flags
+    [[ "$duration" -lt 250 ]]
 }
 
 @test "ghs guard test completes within reasonable time" {

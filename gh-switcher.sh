@@ -1143,12 +1143,17 @@ cmd_add() {
     
     # Handle 'current' - get authenticated GitHub user
     if [[ "$username" == "current" ]]; then
+        echo "🔍 Detecting authenticated GitHub user..."
         username=$(gh api user -q .login) || {
             echo "❌ Not authenticated with GitHub CLI" >&2
             echo "   Run: gh auth login" >&2
             return 1
         }
-        echo "✅ Found current user: $username"
+        local detected_host="github.com"
+        if [[ "$host" != "github.com" ]]; then
+            detected_host="$host"
+        fi
+        echo "✅ Found: $username ($detected_host)"
     fi
     
     if ! validate_username "$username"; then
@@ -1251,6 +1256,11 @@ cmd_add() {
         echo "✅ Added $username to user list"
         [[ -n "$ssh_key" ]] && echo "🔐 SSH key: $ssh_key"
         [[ "$host" != "github.com" ]] && echo "🏢 Host: $host"
+        echo
+        # Show next step suggestion
+        local user_num
+        user_num=$(user_count)
+        echo "💡 Next: ghs switch $user_num"
         return 0
     else
         echo "❌ Failed to add user" >&2
@@ -1764,66 +1774,127 @@ cmd_status() {
     if [[ $(user_count) -eq 0 ]]; then
         echo "🎯 GitHub Project Switcher (ghs)"
         echo
-        echo "GitHub account switcher for developers"
+        echo "Lightning-fast GitHub account switcher for developers"
         echo
-        echo "📝 Quick start:"
-        echo "  ghs add current              # Add currently authenticated GitHub user"
-        echo "  ghs add work                 # Add another GitHub account"
-        echo "  ghs add bob --ssh-key ~/.ssh/id_rsa_work  # Add with SSH key"
+        echo "📝 Quick start (3 steps):"
+        echo "  1. ghs add current          # Auto-detect your GitHub account"
+        echo "  2. ghs assign 1             # Use this account in current directory"
+        echo "  3. ghs guard install        # Protect against wrong-account commits"
         echo
-        echo "💡 Why use ghs?"
-        echo "  • Switch GitHub accounts in <100ms"
-        echo "  • Prevent wrong-account commits with guard hooks"
-        echo "  • Auto-switch accounts by project directory"
+        echo "✨ Features:"
+        echo "  • Guard hooks - Block commits with wrong GitHub account"
+        echo "  • SSH key management - Auto-detect and validate SSH keys"
+        echo "  • Quick switching - Change accounts in <100ms"
+        echo "  • Project memory - Auto-switch by directory"
+        echo "  • GitHub Enterprise - Full support for custom hosts"
         echo
         echo "Type 'ghs help' for all commands"
         return 0
     fi
     
+    # Get current project and GitHub CLI user
     local project
     project=$(git_get_repo 2>/dev/null) || project=$(basename "$PWD")
     
-    echo "📍 Current project: $project"
+    local gh_user
+    gh_user=$(gh api user -q .login 2>/dev/null) || gh_user="Not authenticated"
     
-    # Show assigned user for project
-    local assigned_user
-    if assigned_user=$(project_get_user "$project" 2>/dev/null); then
-        echo "👤 Assigned user: $assigned_user"
-        
-        # Quick profile check
-        if profile_has_issues "$assigned_user"; then
-            echo "   ⚠️  Profile has issues - Run 'ghs show $assigned_user' for details"
-        fi
-        
-        local profile
-        if profile=$(profile_get "$assigned_user" 2>/dev/null); then
-            local profile_name profile_email current_config
-            profile_name=$(profile_get_field "$profile" "name")
-            profile_email=$(profile_get_field "$profile" "email")
+    # Get current git config
+    local current_git_email
+    current_git_email=$(git config user.email 2>/dev/null || git config --global user.email 2>/dev/null)
+    
+    # Get assigned user for project
+    local assigned_user=""
+    assigned_user=$(project_get_user "$project" 2>/dev/null) || true
+    
+    # Display header
+    echo "📍 Current project: $project"
+    echo "🔐 GitHub CLI user: $gh_user"
+    echo
+    
+    # Display users with flags
+    echo "👥 Users:"
+    local i=1
+    local user_count=0
+    while IFS= read -r username; do
+        if [[ -n "$username" ]]; then
+            ((user_count++))
+            local flags=""
             
-            if current_config=$(git_get_config "local" 2>/dev/null); then
-                local current_name current_email
-                current_name=$(profile_get_field "$current_config" "name")
-                current_email=$(profile_get_field "$current_config" "email")
-                
-                if [[ "$current_name" == "$profile_name" && "$current_email" == "$profile_email" ]]; then
-                    echo "✅ Git config matches assigned user"
-                else
-                    echo "⚠️  Git config mismatch"
-                    echo "   Current: $current_name <$current_email>"
-                    echo "   Expected: $profile_name <$profile_email>"
+            # Check if this user is active (git config matches)
+            local profile
+            if profile=$(profile_get "$username" 2>/dev/null); then
+                local profile_email
+                profile_email=$(profile_get_field "$profile" "email")
+                if [[ "$profile_email" == "$current_git_email" ]]; then
+                    flags="$flags <active>"
                 fi
-            else
-                echo "❌ Git config not set"
+                
+                # Check for host
+                local host
+                host=$(profile_get_field "$profile" "host")
+                if [[ -n "$host" && "$host" != "github.com" ]]; then
+                    flags="$flags ($host)"
+                fi
             fi
-        else
-            echo "   ⚠️  Profile missing"
-            echo "   Run 'ghs edit $assigned_user' to create"
+            
+            # Check if assigned to this project
+            if [[ "$username" == "$assigned_user" ]]; then
+                flags="$flags <assigned>"
+            fi
+            
+            printf "  %d. %-20s%s\n" "$i" "$username" "$flags"
+            ((i++))
         fi
-    else
-        echo "👤 No user assigned to this project"
-        echo "   Use 'ghs assign <user>' to assign a user"
+    done < "$GH_USERS_CONFIG"
+    
+    echo
+    echo "⚡ Quick actions:"
+    
+    # Show contextual switch suggestion (don't suggest current active user)
+    if [[ $user_count -gt 1 ]]; then
+        # Find a user that isn't currently active
+        local switch_suggestion=""
+        local j=1
+        while IFS= read -r other_user; do
+            if [[ -n "$other_user" ]]; then
+                local other_profile
+                if other_profile=$(profile_get "$other_user" 2>/dev/null); then
+                    local other_email
+                    other_email=$(profile_get_field "$other_profile" "email")
+                    if [[ "$other_email" != "$current_git_email" ]]; then
+                        switch_suggestion="$j"
+                        break
+                    fi
+                fi
+                ((j++))
+            fi
+        done < "$GH_USERS_CONFIG"
+        
+        if [[ -n "$switch_suggestion" ]]; then
+            echo "  ghs switch $switch_suggestion        # Switch to different account"
+        fi
+    elif [[ $user_count -eq 1 ]]; then
+        echo "  ghs add current     # Add another GitHub account"
     fi
+    
+    # Show assign command if in a git repo and no assignment
+    if git rev-parse --git-dir >/dev/null 2>&1 && [[ $user_count -gt 0 ]] && [[ -z "$assigned_user" ]]; then
+        echo "  ghs assign <1-$user_count>    # Always use account X in this directory"
+    fi
+    
+    # Show guard install only if in git repo and guards not installed
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        local hook_file=".git/hooks/pre-commit"
+        if [[ ! -f "$hook_file" ]] || ! grep -q "GHS_GUARD_HOOK" "$hook_file" 2>/dev/null; then
+            echo "  ghs guard install   # Protect this repo from wrong-account commits"
+        fi
+    fi
+    
+    echo "  ghs help            # Show all commands"
+    echo
+    echo "Type 'ghs help' for all commands"
+    
     return 0
 }
 
@@ -1958,20 +2029,36 @@ cmd_guard() {
             guard_test
             ;;
         *)
-            echo "🛡️  GitHub Guard Hooks"
+            echo "🛡️  GitHub Guard Hooks - Prevent Wrong-Account Commits"
+            echo
+            echo "Guard hooks protect you from accidentally committing with the wrong GitHub"
+            echo "account. When installed, they check before each commit that your current"
+            echo "git config matches the GitHub account assigned to this project."
             echo
             echo "Usage: ghs guard <subcommand>"
             echo
             echo "Subcommands:"
-            echo "  install     Install guard hooks for current repository"
+            echo "  install     Install pre-commit hook for this repository"
+            echo "              The hook will verify your GitHub account before each commit"
             echo "  uninstall   Remove guard hooks from current repository"
-            echo "  status      Check guard hook installation status"
-            echo "  test        Test guard validation without installing"
+            echo "              Disables account verification for this repo"
+            echo "  status      Check if guard hooks are installed and working"
+            echo "              Shows current protection status for this repo"
+            echo "  test        Simulate what would happen on commit"
+            echo "              Useful for debugging without actually committing"
+            echo
+            echo "How it works:"
+            echo "  1. You assign a GitHub account to a project: ghs assign alice"
+            echo "  2. You install guard hooks: ghs guard install"
+            echo "  3. Before each commit, the hook verifies you're using account 'alice'"
+            echo "  4. If there's a mismatch, the commit is blocked with a helpful message"
             echo
             echo "Examples:"
-            echo "  ghs guard install   # Install protection for this repo"
-            echo "  ghs guard test      # Test if validation would pass"
-            echo "  ghs guard status    # Check current protection status"
+            echo "  ghs guard install   # Start protecting this repo"
+            echo "  ghs guard test      # Check if your next commit would be allowed"
+            echo "  ghs guard status    # See current protection status"
+            echo
+            echo "💡 Tip: Install guards on all work repos to prevent personal commits!"
             return 0
             ;;
     esac
@@ -1986,17 +2073,17 @@ USAGE:
   ghs <command> [options]
 
 COMMANDS:
-  add <username|current>  Add a new user (use 'current' for authenticated user)
-  remove <user>           Remove user by name or ID
-  switch <user>           Switch to user by name or ID
-  assign <user>           Assign user to current project
-  users                   List all configured users
-  show <user>             Show profile details       [NEW]
-  edit <user>             Edit profile settings      [NEW]
-  test-ssh [<user>]       Test SSH authentication    [NEW]
-  status                  Show current project status
-  guard <subcommand>      Manage guard hooks for account validation
-  help                    Show this help
+  add <user|current>  Add GitHub account ('current' auto-detects from gh CLI)
+  remove <user>       Remove account by name or number
+  switch <user>       Change active git config to different account
+  assign <user>       Auto-switch to this account in current directory
+  users               List all accounts with SSH/HTTPS status
+  show <user>         View account details and diagnose issues      [NEW]
+  edit <user>         Update email, SSH key, or host settings      [NEW]
+  test-ssh [<user>]   Verify SSH key works with GitHub            [NEW]
+  status              Show current account and project state (default)
+  guard               Prevent wrong-account commits (see 'ghs guard')
+  help                Show this help message
 
 OPTIONS:
   --ssh-key <path>      Specify SSH key for add command
@@ -2024,6 +2111,9 @@ ghs() {
     local cmd="${1:-status}"
     shift 2>/dev/null || true
     
+    # Strip out anything that isn't alphanumeric, dash, or underscore
+    cmd="${cmd//[^a-zA-Z0-9_-]/}"
+    
     # Initialize configuration
     init_config
     
@@ -2041,7 +2131,7 @@ ghs() {
         help|--help|-h)   cmd_help ;;
         *)                
             echo "❌ Unknown command: $cmd"
-            cmd_help
+            echo "Try 'ghs help' for usage information"
             return 1 
             ;;
     esac

@@ -54,7 +54,7 @@ teardown() {
     assert_output_contains "Continue anyway?"
 }
 
-@test "status command shows profile warnings" {
+@test "status command shows assigned user" {
     # Create a test git repo
     local project="test-project"
     mkdir -p "$TEST_HOME/$project"
@@ -70,12 +70,12 @@ teardown() {
     
     run ghs status
     assert_success
-    assert_output_contains "Assigned user: alice"
-    assert_output_contains "Profile has issues"
-    assert_output_contains "Run 'ghs show alice' for details"
+    assert_output_contains "alice"
+    assert_output_contains "<assigned>"
+    # Profile warnings are shown in 'ghs show', not in status
 }
 
-@test "status shows missing profile warning" {
+@test "status shows user without profile" {
     # Create a test git repo
     local project="test-project"
     mkdir -p "$TEST_HOME/$project"
@@ -90,9 +90,9 @@ teardown() {
     
     run ghs status
     assert_success
-    assert_output_contains "Assigned user: bob"
-    assert_output_contains "Profile missing"
-    assert_output_contains "Run 'ghs edit bob' to create"
+    assert_output_contains "bob"
+    assert_output_contains "<assigned>"
+    # Profile details are shown in 'ghs show', not in status
 }
 
 @test "show command detects git config mismatch for active user" {
@@ -161,9 +161,9 @@ teardown() {
     run ghs help
     assert_success
     assert_output_contains "show <user>"
-    assert_output_contains "Show profile details"
+    assert_output_contains "View account details and diagnose issues"
     assert_output_contains "edit <user>"
-    assert_output_contains "Edit profile settings"
+    assert_output_contains "Update email, SSH key, or host settings"
     assert_output_contains "[NEW]"
 }
 
@@ -218,7 +218,7 @@ EOF
     # 1. Add current user
     run ghs add current
     assert_success
-    assert_output_contains "Found current user: newuser"
+    assert_output_contains "Found: newuser"
     assert_output_contains "Added newuser"
     
     # 2. Verify user was added
@@ -240,4 +240,34 @@ EOF
     run ghs status
     assert_success
     assert_output_contains "Current project: project"
+}
+
+@test "invalid commands don't corrupt terminal" {
+    # Test that previously problematic inputs don't blow up the terminal
+    # This is a regression test for the bug where 'ghs 1' nuked the terminal
+    
+    # Numeric input (the original bug)
+    run ghs 1
+    assert_failure
+    assert_output_contains "Unknown command"
+    
+    # Command injection attempt
+    run ghs "; echo hacked"
+    assert_failure
+    assert_output_contains "Unknown command"
+    
+    # Special characters that could mess up terminal
+    run ghs '$USER'
+    assert_failure
+    assert_output_contains "Unknown command"
+    
+    # Very long input
+    run ghs "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert_failure
+    assert_output_contains "Unknown command"
+    
+    # Empty after sanitization (emoji)
+    run ghs "🚀"
+    assert_failure
+    assert_output_contains "Unknown command"
 }

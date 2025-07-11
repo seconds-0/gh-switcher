@@ -38,7 +38,7 @@ EOF
     
     # Then
     assert_success
-    assert_output_contains "Found current user: alice"
+    assert_output_contains "Found: alice"
     assert_output_contains "Added alice to user list"
     assert_user_exists "alice"
 }
