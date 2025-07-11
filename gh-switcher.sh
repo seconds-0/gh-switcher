@@ -1801,7 +1801,7 @@ cmd_status() {
     
     # Get current git config
     local current_git_email
-    current_git_email=$(git config --global user.email 2>/dev/null)
+    current_git_email=$(git config user.email 2>/dev/null || git config --global user.email 2>/dev/null)
     
     # Get assigned user for project
     local assigned_user=""
@@ -1886,7 +1886,7 @@ cmd_status() {
     # Show guard install only if in git repo and guards not installed
     if git rev-parse --git-dir >/dev/null 2>&1; then
         local hook_file=".git/hooks/pre-commit"
-        if [[ ! -f "$hook_file" ]] || ! grep -q "ghs guard test" "$hook_file" 2>/dev/null; then
+        if [[ ! -f "$hook_file" ]] || ! grep -q "GHS_GUARD_HOOK" "$hook_file" 2>/dev/null; then
             echo "  ghs guard install   # Protect this repo from wrong-account commits"
         fi
     fi
