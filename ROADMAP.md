@@ -19,6 +19,7 @@ Lightning-fast GitHub account switcher for developers with multiple identities. 
 - [x] **Basic Directory Assignment** - Link directories to profiles with `assign`
 - [x] **Enhanced Error States** - Verbose, actionable error messages with fix commands
 - [x] **SSH Key Testing** - Verify SSH keys authenticate with GitHub during `add` and via `test-ssh` command
+- [x] **Multi-Host Support** - Support for GitHub Enterprise with `--host` parameter, v4 profile format
 
 ## In Progress 🚧
 
@@ -26,13 +27,6 @@ Lightning-fast GitHub account switcher for developers with multiple identities. 
 Package gh-switcher for easy installation via npm.
 
 ## High Priority Features 🔥
-
-### Multi-Host Support
-Support different GitHub instances (enterprise vs public):
-- [ ] Add --host parameter to commands
-- [ ] Store host per profile
-- [ ] Switch between github.com and enterprise instances
-- [ ] Maintain separate auth per host
 
 ## Medium Priority Features 📋
 
