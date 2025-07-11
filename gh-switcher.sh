@@ -255,6 +255,47 @@ validate_ssh_key() {
     return 0
 }
 
+# Validate host format
+validate_host() {
+    local host="$1"
+    
+    # Basic sanity check
+    [[ -z "$host" ]] && { echo "❌ Host cannot be empty" >&2; return 1; }
+    [[ ${#host} -gt 253 ]] && { echo "❌ Host too long" >&2; return 1; }
+    
+    # Check for specific invalid patterns first to give better error messages
+    # No protocol prefix
+    if [[ "$host" =~ ^https?:// ]]; then
+        echo "❌ Host should not include protocol" >&2
+        echo "   Use: github.com (not https://github.com)" >&2
+        return 1
+    fi
+    
+    # No port suffix
+    if [[ "$host" =~ :[0-9]+$ ]]; then
+        echo "❌ Host should not include port" >&2
+        echo "   Use: github.com (not github.com:443)" >&2
+        return 1
+    fi
+    
+    # Must be a valid domain name (simplified check)
+    # - Only alphanumeric, dots, and hyphens
+    if [[ ! "$host" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
+        echo "❌ Invalid host format: $host" >&2
+        echo "   Expected format: github.com or github.company.com" >&2
+        return 1
+    fi
+    
+    # Must have at least one dot (not just 'github')
+    if [[ ! "$host" =~ \. ]]; then
+        echo "❌ Host must be a fully qualified domain" >&2
+        echo "   Expected format: github.com or github.company.com" >&2
+        return 1
+    fi
+    
+    return 0
+}
+
 
 # Apply SSH configuration
 apply_ssh_config() {
@@ -364,9 +405,10 @@ _write_profile_entry_to_file() {
     local name="$3"
     local email="$4"
     local ssh_key="${5:-}"
+    local host="${6:-github.com}"  # Default to github.com
     
-    # Format: username|v3|name|email|ssh_key
-    printf "%s|v3|%s|%s|%s\n" "$username" "$name" "$email" "$ssh_key" >> "$file"
+    # Format: username|v4|name|email|ssh_key|host
+    printf "%s|v4|%s|%s|%s|%s\n" "$username" "$name" "$email" "$ssh_key" "$host" >> "$file"
 }
 
 # Write a profile entry (compatibility wrapper)
@@ -375,30 +417,44 @@ write_profile_entry() {
     local name="$2"
     local email="$3"
     local ssh_key="${4:-}"
+    local host="${5:-github.com}"
     
     # Ensure directory exists
     mkdir -p "$(dirname "$GH_USER_PROFILES")"
     
     # Write to global profile file
-    _write_profile_entry_to_file "$GH_USER_PROFILES" "$username" "$name" "$email" "$ssh_key"
+    _write_profile_entry_to_file "$GH_USER_PROFILES" "$username" "$name" "$email" "$ssh_key" "$host"
 }
 
 # Create user profile
 profile_create() {
     local username="$1"
     local name="${2:-$username}"
-    local email="${3:-$username@users.noreply.github.com}"
+    local email="${3:-}"
     local ssh_key="${4:-}"
+    local host="${5:-github.com}"
+    
+    # Generate default email based on host
+    if [[ -z "$email" ]]; then
+        if [[ "$host" == "github.com" ]]; then
+            email="${username}@users.noreply.github.com"
+        else
+            # Enterprise format: username@host
+            email="${username}@${host}"
+        fi
+    fi
     
     # Validate inputs
     validate_username "$username" || return 1
     _validate_field_length "$name" "Name" 200 || return 1
     _validate_email "$email" || return 1
+    validate_host "$host" || return 1
     
     # Validate no pipes in fields (pipes are field separators)
     _validate_no_pipes "$name" "name" || return 1
     _validate_no_pipes "$email" "email" || return 1
     [[ -n "$ssh_key" ]] && { _validate_no_pipes "$ssh_key" "SSH key path" || return 1; }
+    _validate_no_pipes "$host" "host" || return 1
     
     # Note: SSH key path validation happens in validate_ssh_key later
     
@@ -412,7 +468,7 @@ profile_create() {
     fi
     
     # Add new profile entry
-    _write_profile_entry_to_file "$temp_file" "$username" "$name" "$email" "$ssh_key"
+    _write_profile_entry_to_file "$temp_file" "$username" "$name" "$email" "$ssh_key" "$host"
     
     # Atomic replace
     mv -f "$temp_file" "$GH_USER_PROFILES"
@@ -431,20 +487,22 @@ profile_get() {
     profile_line=$(grep "^${username}|" "$GH_USER_PROFILES" | head -1)
     [[ -n "$profile_line" ]] || return 1
     
-    # Parse v3 profile line: username|v3|name|email|ssh_key
-    local field_count
-    field_count=$(echo "$profile_line" | tr '|' '\n' | wc -l)
-    if [[ "$field_count" -ne 5 ]]; then
-        echo "❌ Invalid profile format for $username" >&2
+    # Parse v4: username|v4|name|email|ssh_key|host
+    local name email ssh_key host
+    IFS='|' read -r _ _ name email ssh_key host <<< "$profile_line"
+    
+    # Validate it's v4 format
+    local version="${profile_line#*|}"
+    version="${version%%|*}"
+    if [[ "$version" != "v4" ]]; then
+        echo "❌ Unsupported profile version: $version (only v4 supported)" >&2
         return 1
     fi
-    
-    local name email ssh_key
-    IFS='|' read -r _ _ name email ssh_key <<< "$profile_line"
     
     echo "name:$name"
     echo "email:$email"
     echo "ssh_key:$ssh_key"
+    echo "host:${host:-github.com}"  # Fallback if empty
 }
 
 # Apply profile to git config
@@ -579,12 +637,13 @@ ssh_apply_config() {
 # Test SSH authentication with GitHub
 test_ssh_auth() {
     local ssh_key="$1"
+    local host="${2:-github.com}"
     
-    # Test GitHub SSH with specific key
+    # Test SSH with specific host
     # Using SSH's built-in timeout for portability (no external timeout command)
     local output
     # Disable pipefail for this command as SSH returns 1 even on success
-    if output=$(ssh -T git@github.com \
+    if output=$(ssh -T "git@${host}" \
         -o BatchMode=yes \
         -o StrictHostKeyChecking=no \
         -o ConnectTimeout=3 \
@@ -1002,6 +1061,17 @@ guard_test() {
         return 1
     }
     
+    # If we have a profile, check if it's for a different host
+    local profile expected_host
+    profile=$(profile_get "$assigned" 2>/dev/null)
+    if [[ -n "$profile" ]]; then
+        expected_host=$(profile_get_field "$profile" "host")
+        if [[ -n "$expected_host" ]] && [[ "$expected_host" != "github.com" ]]; then
+            echo "ℹ️  Note: This profile is for host: $expected_host"
+            echo "   Ensure you're authenticated: gh auth status --hostname $expected_host"
+        fi
+    fi
+    
     # Check git config
     local name=$(git config user.name)
     local email=$(git config user.email)
@@ -1048,15 +1118,17 @@ user_has_ssh_key() {
 cmd_add() {
     local username="${1:-}"
     local ssh_key=""
+    local host="github.com"  # Default
     
     # Parse options
     shift || true
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --ssh-key) ssh_key="$2"; shift 2 ;;
+            --host) host="$2"; shift 2 ;;
             *)         
                 echo "❌ Unknown option: $1" >&2
-                echo "Usage: ghs add-user <username> [--ssh-key <path>]" >&2
+                echo "Usage: ghs add-user <username> [--ssh-key <path>] [--host <github.com|github.enterprise.com>]" >&2
                 return 1
                 ;;
         esac
@@ -1065,12 +1137,17 @@ cmd_add() {
     # Validate input
     if [[ -z "$username" ]]; then
         echo "❌ Username required" >&2
-        echo "Usage: ghs add-user <username> [--ssh-key <path>]" >&2
+        echo "Usage: ghs add-user <username> [--ssh-key <path>] [--host <github.com|github.enterprise.com>]" >&2
         return 1
     fi
     
     if ! validate_username "$username"; then
         echo "❌ Invalid username format" >&2
+        return 1
+    fi
+    
+    # Validate host format
+    if ! validate_host "$host"; then
         return 1
     fi
     
@@ -1103,10 +1180,11 @@ cmd_add() {
         # Test SSH authentication if key is valid
         if [[ -n "$ssh_key" ]] && [[ -f "$ssh_key" ]]; then
             echo "🔐 Testing SSH authentication..."
+            echo "   Host: $host"
             local result exit_code
             
             # Run SSH test and capture both output and exit code
-            if result=$(test_ssh_auth "$ssh_key" 2>&1); then
+            if result=$(test_ssh_auth "$ssh_key" "$host" 2>&1); then
                 exit_code=0
             else
                 exit_code=$?
@@ -1159,9 +1237,10 @@ cmd_add() {
     fi
     
     # Add user and create profile
-    if user_add "$username" && profile_create "$username" "$username" "${username}@users.noreply.github.com" "$ssh_key"; then
+    if user_add "$username" && profile_create "$username" "$username" "" "$ssh_key" "$host"; then
         echo "✅ Added $username to user list"
         [[ -n "$ssh_key" ]] && echo "🔐 SSH key: $ssh_key"
+        [[ "$host" != "github.com" ]] && echo "🏢 Host: $host"
         return 0
     else
         echo "❌ Failed to add user" >&2
@@ -1246,6 +1325,21 @@ cmd_switch() {
         return 1
     }
     
+    # Get target host
+    local host
+    host=$(profile_get_field "$profile" "host")
+    [[ -z "$host" ]] && host="github.com"
+    
+    # Show what we're switching to
+    echo "🔄 Switching to $username on $host"
+    
+    # Check if different host than github.com
+    if [[ "$host" != "github.com" ]]; then
+        echo "💡 For enterprise hosts, ensure you're authenticated:"
+        echo "   gh auth status --hostname $host"
+        echo "   If not: gh auth login --hostname $host"
+    fi
+    
     # Check SSH key before switching
     local ssh_key
     ssh_key=$(echo "$profile" | grep "^ssh_key:" | cut -d: -f2-)
@@ -1318,12 +1412,24 @@ cmd_users() {
     while IFS= read -r username; do
         if [[ -n "$username" ]]; then
             local profile_info=""
-            if user_has_ssh_key "$username"; then
-                profile_info=" [SSH]"
-            else
-                profile_info=" [HTTPS]"
+            local host_info=""
+            
+            # Get profile details
+            local profile
+            if profile=$(profile_get "$username" 2>/dev/null); then
+                local host=$(profile_get_field "$profile" "host")
+                if [[ -n "$host" ]] && [[ "$host" != "github.com" ]]; then
+                    host_info=" ($host)"
+                fi
+                
+                if user_has_ssh_key "$username"; then
+                    profile_info=" [SSH]"
+                else
+                    profile_info=" [HTTPS]"
+                fi
             fi
-            echo "  $i. $username$profile_info"
+            
+            echo "  $i. $username$profile_info$host_info"
             ((i++))
         fi
     done < "$GH_USERS_CONFIG"
@@ -1372,13 +1478,16 @@ cmd_show() {
     }
     
     # Parse profile fields
-    local name email ssh_key
+    local name email ssh_key host
     name=$(profile_get_field "$profile" "name")
     email=$(profile_get_field "$profile" "email")
     ssh_key=$(profile_get_field "$profile" "ssh_key")
+    host=$(profile_get_field "$profile" "host")
+    [[ -z "$host" ]] && host="github.com"
     
     # Display basic info
     echo "👤 $username"
+    [[ "$host" != "github.com" ]] && echo "   Host: $host"
     echo "   Email: $email"
     echo "   Name: $name"
     
@@ -1454,11 +1563,13 @@ cmd_edit_usage() {
     echo "  --email <email>     Update email address"
     echo "  --name <name>       Update display name"
     echo "  --ssh-key <path>    Update SSH key (use 'none' to remove)"
+    echo "  --host <domain>     Update GitHub host (e.g., github.company.com)"
     echo
     echo "Examples:"
     echo "  ghs edit alice --email alice@company.com"
     echo "  ghs edit bob --ssh-key ~/.ssh/id_ed25519_bob"
     echo "  ghs edit work --name 'Work Account' --ssh-key none"
+    echo "  ghs edit work --host github.enterprise.com"
 }
 
 # Edit user profile (email, name, SSH key)
@@ -1483,24 +1594,28 @@ cmd_edit() {
     fi
     
     # Get current profile or defaults
-    local profile current_name current_email current_ssh
+    local profile current_name current_email current_ssh current_host
     profile=$(profile_get "$username" 2>/dev/null)
     
     if [[ -z "$profile" ]]; then
         current_name="$username"
         current_email="${username}@users.noreply.github.com"
         current_ssh=""
+        current_host="github.com"
         echo "ℹ️  No profile found, creating new one"
     else
         current_name=$(profile_get_field "$profile" "name")
         current_email=$(profile_get_field "$profile" "email")
         current_ssh=$(profile_get_field "$profile" "ssh_key")
+        current_host=$(profile_get_field "$profile" "host")
+        [[ -z "$current_host" ]] && current_host="github.com"
     fi
     
     # Initialize with current values
     local new_name="$current_name"
     local new_email="$current_email"
     local new_ssh="$current_ssh"
+    local new_host="$current_host"
     local changes_made=false
     
     # Parse options
@@ -1529,6 +1644,15 @@ cmd_edit() {
                 changes_made=true
                 shift 2
                 ;;
+            --host)
+                cmd_edit_validate_arg "$1" "$2" || return 1
+                new_host="$2"
+                if ! validate_host "$new_host"; then
+                    return 1
+                fi
+                changes_made=true
+                shift 2
+                ;;
             --gpg-key|--signing-key)
                 echo "❌ GPG commit signing is not currently supported"
                 echo "   gh-switcher focuses on authentication (SSH/HTTPS)"
@@ -1543,7 +1667,7 @@ cmd_edit() {
     done
     
     # Delegate to update function
-    cmd_edit_update_profile "$username" "$new_email" "$new_name" "$new_ssh" "$current_email" "$current_name" "$current_ssh" "$changes_made"
+    cmd_edit_update_profile "$username" "$new_email" "$new_name" "$new_ssh" "$new_host" "$current_email" "$current_name" "$current_ssh" "$current_host" "$changes_made"
 }
 
 # Update user profile with provided changes
@@ -1552,10 +1676,12 @@ cmd_edit_update_profile() {
     local new_email="$2"
     local new_name="$3"
     local new_ssh="$4"
-    local current_email="$5"
-    local current_name="$6"
-    local current_ssh="$7"
-    local changes_made="$8"
+    local new_host="$5"
+    local current_email="$6"
+    local current_name="$7"
+    local current_ssh="$8"
+    local current_host="$9"
+    local changes_made="${10}"
     
     # Check if any changes requested
     if [[ "$changes_made" == false ]]; then
@@ -1593,7 +1719,7 @@ cmd_edit_update_profile() {
     fi
     
     # Apply changes
-    if ! profile_create "$username" "$new_name" "$new_email" "$new_ssh"; then
+    if ! profile_create "$username" "$new_name" "$new_email" "$new_ssh" "$new_host"; then
         echo "❌ Failed to update profile"
         return 1
     fi
@@ -1737,8 +1863,8 @@ cmd_test_ssh() {
         }
     fi
     
-    # Get SSH key for user
-    local profile ssh_key
+    # Get profile and host
+    local profile ssh_key host
     profile=$(profile_get "$username") || {
         [[ "$quiet" == "true" ]] && return 1
         echo "❌ User not found: $username"
@@ -1746,6 +1872,9 @@ cmd_test_ssh() {
     }
     
     ssh_key=$(profile_get_field "$profile" "ssh_key")
+    host=$(profile_get_field "$profile" "host")
+    [[ -z "$host" ]] && host="github.com"
+    
     if [[ -z "$ssh_key" ]]; then
         [[ "$quiet" == "true" ]] && return 0
         echo "ℹ️  No SSH key configured for $username"
@@ -1763,11 +1892,12 @@ cmd_test_ssh() {
     
     [[ "$quiet" != "true" ]] && {
         echo "🔐 Testing SSH authentication for $username..."
+        echo "   Host: $host"
         echo "   Key: ${ssh_key/#$HOME/~}"
     }
     
     local exit_code
-    test_ssh_auth "$ssh_key"
+    test_ssh_auth "$ssh_key" "$host"
     exit_code=$?
     
     [[ "$quiet" == "true" ]] && return $exit_code
@@ -1860,10 +1990,13 @@ COMMANDS:
 
 OPTIONS:
   --ssh-key <path>      Specify SSH key for add command
+  --host <domain>       Specify GitHub host (default: github.com)
 
 EXAMPLES:
   ghs add alice
   ghs add bob --ssh-key ~/.ssh/id_rsa_work
+  ghs add work --host github.company.com
+  ghs edit alice --host github.enterprise.com
   ghs switch 1
   ghs assign alice
   ghs status
