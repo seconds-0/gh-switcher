@@ -67,6 +67,11 @@ setup_test_project_assignment() {
     local project="$1"
     local username="$2"
     echo "$project=$username" >> "$GH_PROJECT_CONFIG"
+    
+    # Also create a basic profile for the user if it doesn't exist
+    if ! grep -q "^${username}|" "$GH_USER_PROFILES" 2>/dev/null; then
+        echo "${username}|v3|${username}|${username}@example.com|" >> "$GH_USER_PROFILES"
+    fi
 }
 
 # Create existing pre-commit hook for testing backup functionality
@@ -80,7 +85,10 @@ create_existing_precommit_hook() {
 # Run guard command and capture output (inside git repo)
 run_guard_command() {
     cd "$TEST_GIT_REPO"
-    run bash "$BATS_TEST_DIRNAME/../../gh-switcher.sh" guard "$@"
+    run env GH_PROJECT_CONFIG="$GH_PROJECT_CONFIG" \
+        GH_USERS_CONFIG="$GH_USERS_CONFIG" \
+        GH_USER_PROFILES="$GH_USER_PROFILES" \
+        bash "$BATS_TEST_DIRNAME/../../gh-switcher.sh" guard "$@"
 }
 
 # Run guard command without changing directory (for testing outside git repo)

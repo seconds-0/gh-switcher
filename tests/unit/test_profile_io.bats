@@ -15,7 +15,7 @@ teardown() {
     cleanup_test_environment
 }
 
-@test "write_profile_entry creates valid v3 profile format" {
+@test "write_profile_entry creates valid v4 profile format" {
     # Given
     local username="testuser"
     local name="Test User"
@@ -29,11 +29,11 @@ teardown() {
     assert_file_exists "$GH_USER_PROFILES"
     local profile_line=$(cat "$GH_USER_PROFILES")
     
-    # v3 format: username|v3|name|email|ssh_key
-    [ "$profile_line" = "testuser|v3|Test User|test@example.com|" ]
+    # v4 format: username|v4|name|email|ssh_key|host
+    [ "$profile_line" = "testuser|v4|Test User|test@example.com||github.com" ]
 }
 
-@test "write_profile_entry creates valid v3 profile with SSH key" {
+@test "write_profile_entry creates valid v4 profile with SSH key" {
     # Given
     local username="testuser"
     local name="Test User"
@@ -47,8 +47,8 @@ teardown() {
     assert_file_exists "$GH_USER_PROFILES"
     local profile_line=$(cat "$GH_USER_PROFILES")
     
-    # v3 format: username|v3|name|email|ssh_key
-    [ "$profile_line" = "testuser|v3|Test User|test@example.com|/home/test/.ssh/id_rsa" ]
+    # v4 format: username|v4|name|email|ssh_key|host
+    [ "$profile_line" = "testuser|v4|Test User|test@example.com|/home/test/.ssh/id_rsa|github.com" ]
 }
 
 @test "profile_create stores user data correctly" {
@@ -60,7 +60,7 @@ teardown() {
     assert_file_exists "$GH_USER_PROFILES"
     
     local profile_line=$(cat "$GH_USER_PROFILES")
-    [ "$profile_line" = "testuser|v3|Test User|test@example.com|/path/to/key" ]
+    [ "$profile_line" = "testuser|v4|Test User|test@example.com|/path/to/key|github.com" ]
 }
 
 @test "profile_get retrieves v3 format correctly" {
