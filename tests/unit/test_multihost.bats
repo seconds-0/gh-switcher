@@ -68,22 +68,21 @@ teardown() {
 # =============================================================================
 
 
-@test "profile_get handles v5 format with custom host" {
-    # Create v4 profile
-    echo "work	v5	Work User	work@company.com	~/.ssh/work	github.company.com" > "$GH_USER_PROFILES"
+@test "profile_get handles format with custom host" {
+    # Create profile
+    echo "work	Work User	work@company.com	~/.ssh/work	github.company.com" > "$GH_USER_PROFILES"
     
     run profile_get "work"
     assert_success
     assert_output_contains "host:github.company.com"
 }
 
-@test "profile_create creates v4 format with host" {
+@test "profile_create creates format with host" {
     run profile_create "enterprise" "Enterprise User" "enterprise@company.com" "~/.ssh/enterprise" "github.enterprise.com"
     assert_success
     
     # Check created profile
     run cat "$GH_USER_PROFILES"
-    assert_output_contains "	v5	"
     assert_output_contains "github.enterprise.com"
 }
 
@@ -93,7 +92,6 @@ teardown() {
     
     # Check created profile
     run cat "$GH_USER_PROFILES"
-    assert_output_contains "	v5	"
     assert_output_contains "github.com"
 }
 

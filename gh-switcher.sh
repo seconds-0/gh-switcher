@@ -444,15 +444,15 @@ _write_profile_entry_to_file() {
     local ssh_key="${5:-}"
     local host="${6:-github.com}"  # Default to github.com
     
-    # v5 format: tab-separated, no escaping needed
+    # Tab-separated format, no escaping needed
     # Validate no tabs in input (they can't exist in these fields anyway)
     if [[ "$username$name$email$ssh_key$host" == *$'\t'* ]]; then
         echo "❌ Invalid character (tab) in profile data" >&2
         return 1
     fi
     
-    # Format: username	v5	name	email	ssh_key	host
-    printf "%s\tv5\t%s\t%s\t%s\t%s\n" "$username" "$name" "$email" "$ssh_key" "$host" >> "$file"
+    # Format: username	name	email	ssh_key	host
+    printf "%s\t%s\t%s\t%s\t%s\n" "$username" "$name" "$email" "$ssh_key" "$host" >> "$file"
 }
 
 # Write a profile entry (compatibility wrapper)
@@ -518,7 +518,7 @@ profile_create() {
     _validate_email "$email" || return 1
     validate_host "$host" || return 1
     
-    # Note: Only v5 tab-delimited format is supported
+    # Note: Tab-delimited format is used for profiles
     
     # Perform the profile creation with file locking
     with_file_lock "$GH_USER_PROFILES" _profile_create_locked "$username" "$name" "$email" "$ssh_key" "$host"
@@ -534,28 +534,21 @@ profile_get() {
     [[ -f "$GH_USER_PROFILES" ]] || return 1
     
     local profile_line
-    # Look for v5 (tab-delimited) format
+    # Look for tab-delimited format
     profile_line=$(grep "^${username}	" "$GH_USER_PROFILES" | head -1)
     [[ -n "$profile_line" ]] || return 1
     
-    # Parse v5 tab-delimited format (handle empty fields correctly)
-    # Format: username	v5	name	email	ssh_key	host
-    local version name email ssh_key host
+    # Parse tab-delimited format (handle empty fields correctly)
+    # Format: username	name	email	ssh_key	host
+    local name email ssh_key host
     
     # Manual parsing to handle empty fields properly
     local line="$profile_line"
     line="${line#*	}"  # Skip username field
-    version="${line%%	*}"; line="${line#*	}"
     name="${line%%	*}"; line="${line#*	}"
     email="${line%%	*}"; line="${line#*	}"
     ssh_key="${line%%	*}"; line="${line#*	}"
     host="$line"
-    
-    # Basic validation as planned
-    if [[ "$version" != "v5" ]]; then
-        echo "❌ Unsupported profile version: $version" >&2
-        return 1
-    fi
     
     echo "name:$name"
     echo "email:$email"
@@ -1153,11 +1146,11 @@ fi
 
 # Check git config matches profile
 if [[ -f "$GH_USER_PROFILES" ]]; then
-    # Look for v5 format profile
+    # Look for profile
     profile_line=$(grep "^${assigned_user}	" "$GH_USER_PROFILES" | head -1)
     if [[ -n "$profile_line" ]]; then
-        # Parse v5 format: username	v5	name	email	ssh_key	host
-        IFS=$'\t' read -r username version name email ssh_key host <<< "$profile_line"
+        # Parse format: username	name	email	ssh_key	host
+        IFS=$'\t' read -r username name email ssh_key host <<< "$profile_line"
         
         # Get current git config
         current_email=$(git config user.email 2>/dev/null || true)
