@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Test profile I/O functionality with v4 pipe-delimited format
+# Test profile I/O functionality with v5 tab-delimited format
 
 load '../helpers/test_helper'
 load '../helpers/ssh_helper'
@@ -15,7 +15,7 @@ teardown() {
     cleanup_test_environment
 }
 
-@test "write_profile_entry creates valid v4 profile format" {
+@test "write_profile_entry creates valid v5 profile format" {
     # Given
     local username="testuser"
     local name="Test User"
@@ -29,11 +29,11 @@ teardown() {
     assert_file_exists "$GH_USER_PROFILES"
     local profile_line=$(cat "$GH_USER_PROFILES")
     
-    # v4 format: username|v4|name|email|ssh_key|host
-    [ "$profile_line" = "testuser|v4|Test User|test@example.com||github.com" ]
+    # v5 format: username	v5	name	email	ssh_key	host
+    [ "$profile_line" = "testuser	v5	Test User	test@example.com		github.com" ]
 }
 
-@test "write_profile_entry creates valid v4 profile with SSH key" {
+@test "write_profile_entry creates valid v5 profile with SSH key" {
     # Given
     local username="testuser"
     local name="Test User"
@@ -47,8 +47,8 @@ teardown() {
     assert_file_exists "$GH_USER_PROFILES"
     local profile_line=$(cat "$GH_USER_PROFILES")
     
-    # v4 format: username|v4|name|email|ssh_key|host
-    [ "$profile_line" = "testuser|v4|Test User|test@example.com|/home/test/.ssh/id_rsa|github.com" ]
+    # v5 format: username	v5	name	email	ssh_key	host
+    [ "$profile_line" = "testuser	v5	Test User	test@example.com	/home/test/.ssh/id_rsa	github.com" ]
 }
 
 @test "profile_create stores user data correctly" {
@@ -60,12 +60,12 @@ teardown() {
     assert_file_exists "$GH_USER_PROFILES"
     
     local profile_line=$(cat "$GH_USER_PROFILES")
-    [ "$profile_line" = "testuser|v4|Test User|test@example.com|/path/to/key|github.com" ]
+    [ "$profile_line" = "testuser	v5	Test User	test@example.com	/path/to/key	github.com" ]
 }
 
-@test "profile_get retrieves v4 format correctly" {
+@test "profile_get retrieves v5 format correctly" {
     # Given
-    echo "testuser|v4|Test User|test@example.com|/path/to/key|github.com" > "$GH_USER_PROFILES"
+    echo "testuser	v5	Test User	test@example.com	/path/to/key	github.com" > "$GH_USER_PROFILES"
     
     # When
     run profile_get "testuser"
@@ -80,7 +80,7 @@ teardown() {
 
 @test "profile_get handles missing SSH key" {
     # Given
-    echo "testuser|v4|Test User|test@example.com||github.com" > "$GH_USER_PROFILES"
+    echo "testuser	v5	Test User	test@example.com		github.com" > "$GH_USER_PROFILES"
     
     # When
     run profile_get "testuser"
@@ -100,16 +100,16 @@ teardown() {
     assert_failure
 }
 
-@test "profile_get only supports v4 format" {
-    # Given - v3 format (no longer supported)
-    echo "testuser|v3|Test User|test@example.com|/path/to/key" > "$GH_USER_PROFILES"
+@test "profile_get only supports v5 format" {
+    # Given - v4 format (no longer supported)
+    echo "testuser|v4|Test User|test@example.com|/path/to/key|github.com" > "$GH_USER_PROFILES"
     
     # When
     run profile_get "testuser"
     
-    # Then - should fail as v3 is not supported
+    # Then - should fail as v4 is not supported
     assert_failure
-    assert_output_contains "Unsupported profile version: v3"
+    assert_output_contains "Found v4 format profile - migration needed"
 }
 
 @test "multiple profiles can coexist" {

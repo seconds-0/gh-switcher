@@ -70,6 +70,9 @@ Ask yourself:
 - "It mostly works" or "good enough"
 - Complex solution to simple problem  
 - Can't debug the issue in 15 minutes
+- **Reverting changes due to syntax/technical issues without solving the core problem**
+- **Claiming completion when hitting technical roadblocks**
+- **Marking tasks complete while ignoring the original requirements**
 
 ### When Tests Fail
 **RULE**: Fix the code, never the test
@@ -77,13 +80,33 @@ Ask yourself:
 2. Next 15 min: Fix the root cause
 3. Can't fix in 30 min? Stop and document the blocker
 
+### When You Hit Technical Issues (Syntax Errors, Test Failures, etc.)
+**RULE**: Technical problems don't change the requirements
+1. **First 15 min**: Debug to understand the issue  
+2. **Next 15 min**: Fix the technical problem (syntax, imports, etc.)
+3. **If still blocked**: Ask for help or suggest alternative approaches
+4. **NEVER**: Revert changes and claim the task is complete
+5. **NEVER**: Mark requirements as "done" when technical issues prevented implementation
+
+**Remember**: Syntax errors, test framework issues, and tooling problems are fixable - they don't excuse not meeting the requirements.
+
 ### Before Declaring "Done"
 **RULE**: Always verify against the plan
 1. Review the implementation plan/checklist
 2. Confirm all promised features are implemented
 3. Run all tests that were promised
 4. Check function line counts if refactoring
-5. Ask: "Did I do what I said I would do?"
+5. **Re-read the original requirements and verify each one is met**
+6. **If you reverted changes due to technical issues, the task is NOT complete**
+7. Ask: "Did I do what I said I would do?"
+
+## Development Memories
+
+### Testing and Debugging Philosophy
+- **BATS Syntax errors are normal debugging, not project blockers. Fix the syntax, don't abandon the approach. Look up documentation with web search if stuck**
+
+### Implementation Verification
+- Always check the implementation versus the plan. If it doesnt match the plan, it is wrong. If the plan needs to change, ask the users permission.
 
 ## Code Standards
 
@@ -131,193 +154,3 @@ save_to_file_atomic() {
 # Keep it simple - prefer shell builtins over complex logic
 # Example: Use 'sort -u' instead of manual deduplication loops
 ```
-
-### Error Handling
-- Always quote variables: `"$var"`
-- Use `[[ ]]` for conditionals
-- Exit early with meaningful errors
-- Icons: ✅ success, ⚠️ warning, ❌ error, 💡 tip
-- NEVER use `A && B || C` pattern - use if/then/else
-
-### File Safety
-- Atomic operations with temp files
-- Profile format: `username|v4|name|email|ssh_key|host`
-- Validate input before processing
-- Check file exists before reading: `[[ -f "$file" ]] || return 0`
-
-## Testing
-
-### Test Structure
-```
-tests/
-├── unit/          # Fast, isolated function tests
-├── integration/   # End-to-end workflows
-└── helpers/       # Shared test utilities
-```
-
-### BATS Test Format
-```bash
-#!/usr/bin/env bats
-
-load '../helpers/test_helper'
-
-setup() {
-    setup_test_environment
-    # Test-specific setup
-}
-
-teardown() {
-    cleanup_test_environment
-}
-
-@test "descriptive test name" {
-    # Arrange
-    local input="test"
-    
-    # Act
-    run cmd_example "$input"
-    
-    # Assert
-    assert_success
-    assert_output "✅ Success"
-}
-
-@test "error case handling" {
-    run cmd_example ""
-    assert_failure
-    assert_output "❌ Missing argument"
-}
-
-# For debugging test failures
-@test "debug example" {
-    run some_command
-    echo "Debug output: $output" >&3
-    echo "Debug status: $status" >&3
-    echo "Debug lines: ${lines[*]}" >&3
-    assert_success
-}
-```
-
-### Common Test Patterns
-```bash
-# Setup mock GitHub CLI
-setup_mock_gh_user() {
-    local username="$1"
-    cat > "$TEST_HOME/gh" << EOF
-#!/bin/bash
-if [[ "\$1 \$2 \$3 \$4" == "api user -q .login" ]]; then
-    echo "$username"
-fi
-EOF
-    chmod +x "$TEST_HOME/gh"
-    export PATH="$TEST_HOME:$PATH"
-}
-
-# Test file operations
-create_test_file() {
-    local file="$1"
-    local content="$2"
-    echo "$content" > "$file"
-}
-
-# Assert helpers (from test_helper)
-assert_success      # status = 0
-assert_failure      # status != 0
-assert_output "text"  # exact match
-assert_output_contains "partial"  # substring match
-```
-
-### Performance Requirements
-- Commands: <100ms execution
-- Guard hooks: <300ms execution  
-- Test files: <5s per file on CI
-
-## Common Issues
-
-### Guard Hook Tests
-- Test in isolated environment with proper PATH setup
-- Mock `gh` CLI for predictable behavior
-- Verify hook can find `ghs` after installation
-
-### SSH Key Handling
-- Auto-fix permissions (600) on detection
-- Support absolute and tilde paths
-- Validate key exists before setting
-
-### Profile Format
-- Only v4 format supported
-- Preserve user data during updates
-- Use pipe delimiter for extensibility
-
-## File Structure
-- `gh-switcher.sh` - Main script (~1000 lines)
-- `~/.gh-users` - User list (one per line)
-- `~/.gh-user-profiles` - Enhanced profiles (v4 format)
-- `~/.gh-project-accounts` - Project→user mapping
-
-## Development Philosophy
-
-### User Delight First
-Every line of code must earn its keep by delivering user value.
-
-#### When to Add Code
-✅ Features that spark joy (SSH auto-fix magic)  
-✅ Features that prevent frustration (guard hooks)  
-❌ Features that "might be useful someday"
-
-#### When to Refactor
-- Function approaching 50 lines? Split only if it improves clarity
-- Can't understand code you wrote 3 months ago? Simplify
-- Performance regression? Fix immediately
-
-### Performance IS a Feature
-- <50ms feels instant = delight
-- <100ms feels fast = acceptable
-- >100ms feels broken = fix it
-
-### Anti-Patterns to Avoid
-- Over-engineering simple problems
-- Test-driven design (code-first, then test)
-- Enterprise patterns in a CLI tool
-- Interactive TUIs when CLI works fine
-
-## Pull Request Process
-```bash
-# Create PR body
-cat > /tmp/pr-body.md << 'EOF'
-## Summary
-- What changed
-
-## Test Results
-- All tests pass
-- Performance validated
-
-🤖 Generated with [Claude Code](https://claude.ai/code)
-EOF
-
-# Create PR
-gh pr create --title "feat: description" --body-file /tmp/pr-body.md
-
-# Cleanup
-rm /tmp/pr-body.md
-```
-
-## Development Wisdom
-- Practice defensive programming when reasonable, but dont succumb to overengineering
-
-## Design Principles for Error States
-
-1. Explain what's wrong - "This file no longer exists at the configured location"
-2. Show what we found - List all alternatives with helpful hints
-3. Number the options - Makes it easy to reference
-4. Provide exact commands - Copy-paste friendly
-5. Explain consequences - "This prevents the error: ..."
-6. Always offer escape hatch - "Or use HTTPS instead"
-
-The extra verbosity in error states:
-- Reduces user anxiety
-- Prevents guesswork
-- Makes support easier ("I chose option 2")
-- Educates about the system
-
-This matches how good CLIs handle errors - think git status after a merge conflict, where it becomes very explicit about your options.

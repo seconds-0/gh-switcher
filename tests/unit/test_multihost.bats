@@ -68,9 +68,9 @@ teardown() {
 # =============================================================================
 
 
-@test "profile_get handles v4 format with custom host" {
+@test "profile_get handles v5 format with custom host" {
     # Create v4 profile
-    echo "work|v4|Work User|work@company.com|~/.ssh/work|github.company.com" > "$GH_USER_PROFILES"
+    echo "work	v5	Work User	work@company.com	~/.ssh/work	github.company.com" > "$GH_USER_PROFILES"
     
     run profile_get "work"
     assert_success
@@ -83,8 +83,8 @@ teardown() {
     
     # Check created profile
     run cat "$GH_USER_PROFILES"
-    assert_output_contains "|v4|"
-    assert_output_contains "|github.enterprise.com"
+    assert_output_contains "	v5	"
+    assert_output_contains "github.enterprise.com"
 }
 
 @test "profile_create defaults to github.com when host not specified" {
@@ -93,8 +93,8 @@ teardown() {
     
     # Check created profile
     run cat "$GH_USER_PROFILES"
-    assert_output_contains "|v4|"
-    assert_output_contains "|github.com"
+    assert_output_contains "	v5	"
+    assert_output_contains "github.com"
 }
 
 @test "profile_create generates correct default email for enterprise" {
