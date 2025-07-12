@@ -69,8 +69,8 @@ setup_test_project_assignment() {
     echo "$project=$username" >> "$GH_PROJECT_CONFIG"
     
     # Also create a basic profile for the user if it doesn't exist
-    if ! grep -q "^${username}|" "$GH_USER_PROFILES" 2>/dev/null; then
-        echo "${username}|v4|${username}|${username}@example.com||github.com" >> "$GH_USER_PROFILES"
+    if ! grep -q "^${username}	" "$GH_USER_PROFILES" 2>/dev/null; then
+        printf "%s\tv5\t%s\t%s@example.com\t\tgithub.com\n" "$username" "$username" "$username" >> "$GH_USER_PROFILES"
     fi
 }
 
