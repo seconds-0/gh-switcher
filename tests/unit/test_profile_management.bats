@@ -30,7 +30,7 @@ measure_time_ms() {
 # Show command tests
 @test "ghs show displays profile information" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice Smith|alice@example.com|$TEST_HOME/.ssh/alice_key|github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice Smith	alice@example.com	$TEST_HOME/.ssh/alice_key	github.com" >> "$GH_USER_PROFILES"
     mkdir -p "$TEST_HOME/.ssh"
     touch "$TEST_HOME/.ssh/alice_key"
     chmod 600 "$TEST_HOME/.ssh/alice_key"
@@ -46,7 +46,7 @@ measure_time_ms() {
 
 @test "ghs show works with user ID" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs show 1
     assert_success
@@ -55,7 +55,7 @@ measure_time_ms() {
 
 @test "ghs show detects missing SSH key" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com|$TEST_HOME/.ssh/missing|github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com	$TEST_HOME/.ssh/missing	github.com" >> "$GH_USER_PROFILES"
     
     run ghs show alice
     assert_success
@@ -65,7 +65,7 @@ measure_time_ms() {
 
 @test "ghs show finds alternative SSH keys" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com|$TEST_HOME/.ssh/old_key|github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com	$TEST_HOME/.ssh/old_key	github.com" >> "$GH_USER_PROFILES"
     
     # Create alternative keys
     mkdir -p "$TEST_HOME/.ssh"
@@ -81,7 +81,7 @@ measure_time_ms() {
 
 @test "ghs show detects permission issues" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com|$TEST_HOME/.ssh/alice_key|github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com	$TEST_HOME/.ssh/alice_key	github.com" >> "$GH_USER_PROFILES"
     mkdir -p "$TEST_HOME/.ssh"
     touch "$TEST_HOME/.ssh/alice_key"
     chmod 644 "$TEST_HOME/.ssh/alice_key"
@@ -94,7 +94,7 @@ measure_time_ms() {
 
 @test "ghs show detects email typo" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@github.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@github.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs show alice
     assert_success
@@ -120,7 +120,7 @@ measure_time_ms() {
 # Edit command tests
 @test "ghs edit updates email" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|old@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	old@example.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs edit alice --email new@example.com
     assert_success
@@ -132,7 +132,7 @@ measure_time_ms() {
 
 @test "ghs edit updates name" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Old Name|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Old Name	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs edit alice --name "New Name"
     assert_success
@@ -143,7 +143,7 @@ measure_time_ms() {
 
 @test "ghs edit removes SSH key with none" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com|/ssh/key|github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com	/ssh/key	github.com" >> "$GH_USER_PROFILES"
     
     run ghs edit alice --ssh-key none
     assert_success
@@ -154,7 +154,7 @@ measure_time_ms() {
 
 @test "ghs edit expands tilde in paths" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     mkdir -p "$TEST_HOME/.ssh"
     # Create a mock SSH key with minimal valid content
     echo "-----BEGIN OPENSSH PRIVATE KEY-----" > "$TEST_HOME/.ssh/key"
@@ -168,7 +168,7 @@ measure_time_ms() {
     
     # Check expanded path
     local profile
-    profile=$(grep "^alice|" "$GH_USER_PROFILES")
+    profile=$(grep "^alice	" "$GH_USER_PROFILES")
     [[ "$profile" =~ "$TEST_HOME/.ssh/key" ]]
 }
 
@@ -182,7 +182,7 @@ measure_time_ms() {
 
 @test "ghs edit with no changes shows current" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs edit alice
     assert_success
@@ -192,7 +192,7 @@ measure_time_ms() {
 
 @test "ghs edit validates email format" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs edit alice --email "invalid-email"
     assert_failure
@@ -201,7 +201,7 @@ measure_time_ms() {
 
 @test "ghs edit validates SSH key exists" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs edit alice --ssh-key "/nonexistent/key"
     assert_failure
@@ -219,7 +219,7 @@ measure_time_ms() {
 
 @test "ghs edit handles multiple changes" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs edit alice --name "Alice Smith" --email alice@company.com
     assert_success
@@ -232,7 +232,7 @@ measure_time_ms() {
 # Performance tests
 @test "ghs show completes within reasonable time" {
     echo "perfuser" >> "$GH_USERS_CONFIG"
-    echo "perfuser|v4|Test|test@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "perfuser	Test	test@example.com		github.com" >> "$GH_USER_PROFILES"
     
     local duration=$(measure_time_ms ghs show perfuser)
     echo "# Duration: ${duration}ms" >&3
@@ -242,7 +242,7 @@ measure_time_ms() {
 
 @test "ghs edit completes within reasonable time" {
     echo "perfuser" >> "$GH_USERS_CONFIG"
-    echo "perfuser|v4|Test|test@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "perfuser	Test	test@example.com		github.com" >> "$GH_USER_PROFILES"
     
     local duration=$(measure_time_ms ghs edit perfuser --name "New Name")
     echo "# Duration: ${duration}ms" >&3
@@ -273,7 +273,7 @@ measure_time_ms() {
 
 @test "profile_has_issues detects SSH key problems" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com|/missing/key|github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com	/missing/key	github.com" >> "$GH_USER_PROFILES"
     
     # Source the main script
     # Function is already available from setup_test_environment
@@ -284,7 +284,7 @@ measure_time_ms() {
 
 @test "profile_has_issues detects email typos" {
     echo "bob" >> "$GH_USERS_CONFIG"
-    echo "bob|v4|Bob|bob@github.com||github.com" >> "$GH_USER_PROFILES"
+    echo "bob	Bob	bob@github.com		github.com" >> "$GH_USER_PROFILES"
     
     # Function is already available from setup_test_environment
     
@@ -294,7 +294,7 @@ measure_time_ms() {
 
 @test "profile_has_issues returns 1 for clean profile" {
     echo "clean" >> "$GH_USERS_CONFIG"
-    echo "clean|v4|Clean User|clean@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "clean	Clean User	clean@example.com		github.com" >> "$GH_USER_PROFILES"
     
     # Function is already available from setup_test_environment
     

@@ -39,9 +39,61 @@ init_config() {
     [[ -f "$GH_PROJECT_CONFIG" ]] || touch "$GH_PROJECT_CONFIG"
 }
 
+
 # =============================================================================
 # FILE UTILITIES
 # =============================================================================
+
+# Execute command with exclusive file lock (simple approach)
+with_file_lock() {
+    local file="$1"
+    shift
+    
+    local lock_file="${file}.lock"
+    local timeout=5
+    local start_time=$(date +%s)
+    
+    # Retry loop with timeout
+    while true; do
+        # Try to acquire lock (atomic)
+        if (set -C; echo $$ > "$lock_file") 2>/dev/null; then
+            break
+        fi
+        
+        # Check for stale lock
+        if [[ -f "$lock_file" ]]; then
+            local lock_pid=$(cat "$lock_file" 2>/dev/null)
+            if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+                # Process is dead, remove stale lock
+                rm -f "$lock_file"
+                continue
+            fi
+        fi
+        
+        # Check timeout
+        local current_time=$(date +%s)
+        if (( current_time - start_time >= timeout )); then
+            echo "❌ Lock timeout after ${timeout}s for $file" >&2
+            return 1
+        fi
+        
+        # Brief sleep before retry
+        sleep 0.1
+    done
+    
+    # Set up cleanup
+    trap 'rm -f "$lock_file"' EXIT INT TERM
+    
+    # Run the command
+    "$@"
+    local result=$?
+    
+    # Clean up
+    rm -f "$lock_file"
+    trap - EXIT INT TERM
+    
+    return $result
+}
 
 # Atomic file write operation
 file_write_atomic() {
@@ -168,21 +220,6 @@ _validate_email() {
         return 1
     fi
     
-    return 0
-}
-
-# Validate no pipes in field (pipes are field separators)
-_validate_no_pipes() {
-    local field="$1"
-    local field_name="$2"
-    
-    if [[ "$field" == *"|"* ]]; then
-        echo "❌ Pipes (|) not allowed in $field_name" >&2
-        echo "   Pipes are used as field separators in profile storage" >&2
-        echo "   If you need pipes in your data, please open an issue:" >&2
-        echo "   https://github.com/seconds-0/gh-switcher/issues" >&2
-        return 1
-    fi
     return 0
 }
 
@@ -338,7 +375,7 @@ user_add() {
     validate_username "$username" || return 1
     user_exists "$username" && return 1
     
-    file_append_line "$GH_USERS_CONFIG" "$username"
+    with_file_lock "$GH_USERS_CONFIG" file_append_line "$GH_USERS_CONFIG" "$username"
     return 0
 }
 
@@ -349,7 +386,7 @@ user_remove() {
     validate_username "$username" || return 1
     user_exists "$username" || return 1
     
-    file_remove_line "$GH_USERS_CONFIG" "$username"
+    with_file_lock "$GH_USERS_CONFIG" file_remove_line "$GH_USERS_CONFIG" "$username"
 }
 
 # Check if user exists
@@ -407,8 +444,15 @@ _write_profile_entry_to_file() {
     local ssh_key="${5:-}"
     local host="${6:-github.com}"  # Default to github.com
     
-    # Format: username|v4|name|email|ssh_key|host
-    printf "%s|v4|%s|%s|%s|%s\n" "$username" "$name" "$email" "$ssh_key" "$host" >> "$file"
+    # Tab-separated format, no escaping needed
+    # Validate no tabs in input (they can't exist in these fields anyway)
+    if [[ "$username$name$email$ssh_key$host" == *$'\t'* ]]; then
+        echo "❌ Invalid character (tab) in profile data" >&2
+        return 1
+    fi
+    
+    # Format: username	name	email	ssh_key	host
+    printf "%s\t%s\t%s\t%s\t%s\n" "$username" "$name" "$email" "$ssh_key" "$host" >> "$file"
 }
 
 # Write a profile entry (compatibility wrapper)
@@ -424,6 +468,30 @@ write_profile_entry() {
     
     # Write to global profile file
     _write_profile_entry_to_file "$GH_USER_PROFILES" "$username" "$name" "$email" "$ssh_key" "$host"
+}
+
+# Internal helper for profile creation (called with file lock)
+_profile_create_locked() {
+    local username="$1"
+    local name="$2"
+    local email="$3"
+    local ssh_key="$4"
+    local host="$5"
+    
+    # Create temp file for atomic update
+    local temp_file
+    temp_file=$(mktemp "${GH_USER_PROFILES}.XXXXXX") || return 1
+    
+    # Copy existing profiles except the one we're updating
+    if [[ -f "$GH_USER_PROFILES" ]]; then
+        grep -v "^${username}	" "$GH_USER_PROFILES" > "$temp_file" || true
+    fi
+    
+    # Add new profile entry
+    _write_profile_entry_to_file "$temp_file" "$username" "$name" "$email" "$ssh_key" "$host"
+    
+    # Atomic replace
+    mv -f "$temp_file" "$GH_USER_PROFILES"
 }
 
 # Create user profile
@@ -450,28 +518,10 @@ profile_create() {
     _validate_email "$email" || return 1
     validate_host "$host" || return 1
     
-    # Validate no pipes in fields (pipes are field separators)
-    _validate_no_pipes "$name" "name" || return 1
-    _validate_no_pipes "$email" "email" || return 1
-    [[ -n "$ssh_key" ]] && { _validate_no_pipes "$ssh_key" "SSH key path" || return 1; }
-    _validate_no_pipes "$host" "host" || return 1
+    # Note: Tab-delimited format is used for profiles
     
-    # Note: SSH key path validation happens in validate_ssh_key later
-    
-    # Create temp file for atomic update
-    local temp_file
-    temp_file=$(mktemp "${GH_USER_PROFILES}.XXXXXX") || return 1
-    
-    # Copy existing profiles except the one we're updating
-    if [[ -f "$GH_USER_PROFILES" ]]; then
-        grep -v "^${username}|" "$GH_USER_PROFILES" > "$temp_file" || true
-    fi
-    
-    # Add new profile entry
-    _write_profile_entry_to_file "$temp_file" "$username" "$name" "$email" "$ssh_key" "$host"
-    
-    # Atomic replace
-    mv -f "$temp_file" "$GH_USER_PROFILES"
+    # Perform the profile creation with file locking
+    with_file_lock "$GH_USER_PROFILES" _profile_create_locked "$username" "$name" "$email" "$ssh_key" "$host"
     
     return 0
 }
@@ -484,20 +534,21 @@ profile_get() {
     [[ -f "$GH_USER_PROFILES" ]] || return 1
     
     local profile_line
-    profile_line=$(grep "^${username}|" "$GH_USER_PROFILES" | head -1)
+    # Look for tab-delimited format
+    profile_line=$(grep "^${username}	" "$GH_USER_PROFILES" | head -1)
     [[ -n "$profile_line" ]] || return 1
     
-    # Parse v4: username|v4|name|email|ssh_key|host
+    # Parse tab-delimited format (handle empty fields correctly)
+    # Format: username	name	email	ssh_key	host
     local name email ssh_key host
-    IFS='|' read -r _ _ name email ssh_key host <<< "$profile_line"
     
-    # Validate it's v4 format
-    local version="${profile_line#*|}"
-    version="${version%%|*}"
-    if [[ "$version" != "v4" ]]; then
-        echo "❌ Unsupported profile version: $version (only v4 supported)" >&2
-        return 1
-    fi
+    # Manual parsing to handle empty fields properly
+    local line="$profile_line"
+    line="${line#*	}"  # Skip username field
+    name="${line%%	*}"; line="${line#*	}"
+    email="${line%%	*}"; line="${line#*	}"
+    ssh_key="${line%%	*}"; line="${line#*	}"
+    host="$line"
     
     echo "name:$name"
     echo "email:$email"
@@ -531,6 +582,21 @@ profile_apply() {
     return 0
 }
 
+# Internal helper for profile removal (called with file lock)
+_profile_remove_locked() {
+    local username="$1"
+    
+    # Create temp file for atomic update
+    local temp_file
+    temp_file=$(mktemp "${GH_USER_PROFILES}.XXXXXX") || return 1
+    
+    # Copy all profiles except the one being removed
+    grep -v "^${username}	" "$GH_USER_PROFILES" > "$temp_file" || true
+    
+    # Atomic replace
+    mv -f "$temp_file" "$GH_USER_PROFILES"
+}
+
 # Remove user profile
 profile_remove() {
     local username="$1"
@@ -540,15 +606,8 @@ profile_remove() {
     
     [[ -f "$GH_USER_PROFILES" ]] || return 1
     
-    # Create temp file for atomic update
-    local temp_file
-    temp_file=$(mktemp "${GH_USER_PROFILES}.XXXXXX") || return 1
-    
-    # Copy all profiles except the one being removed
-    grep -v "^${username}|" "$GH_USER_PROFILES" > "$temp_file" || true
-    
-    # Atomic replace
-    mv -f "$temp_file" "$GH_USER_PROFILES"
+    # Perform the profile removal with file locking
+    with_file_lock "$GH_USER_PROFILES" _profile_remove_locked "$username"
 }
 
 
@@ -583,6 +642,9 @@ project_assign() {
     # Atomic replace
     mv -f "$temp_file" "$GH_PROJECT_CONFIG"
     trap - EXIT
+    
+    # Clear cache when assignments change
+    auto_switch_cache_clear
 }
 
 # Get assigned user for project
@@ -599,6 +661,94 @@ project_get_user() {
     [[ -n "$assignment" ]] || return 1
     
     echo "$assignment" | cut -d'=' -f2-
+}
+
+# Path-based assignment functions (for directory auto-switch)
+# Store full path assignments: /Users/alice/work=alice-work
+project_assign_path() {
+    local path="$1"
+    local username="$2"
+    
+    validate_username "$username" || return 1
+    user_exists "$username" || return 1
+    
+    # Normalize path (resolve to absolute)
+    path=$(cd "$path" 2>/dev/null && pwd) || { echo "❌ Invalid path: $path" >&2; return 1; }
+    
+    # Escape path for safe storage (replace | with \|)
+    local escaped_path="${path//|/\\|}"
+    
+    # Remove existing assignment and add new one (atomic operation)
+    local temp_file
+    temp_file=$(mktemp "${GH_PROJECT_CONFIG}.XXXXXX") || return 1
+    
+    # Ensure cleanup on any error
+    trap 'rm -f "$temp_file" 2>/dev/null' EXIT
+    
+    # Copy all assignments except the one being updated
+    if [[ -f "$GH_PROJECT_CONFIG" ]]; then
+        # Keep old format assignments (project=user)
+        grep -v "^${escaped_path}|" "$GH_PROJECT_CONFIG" > "$temp_file" || true
+    fi
+    
+    # Add new path assignment with marker
+    echo "${escaped_path}|$username" >> "$temp_file" || { trap - EXIT; rm -f "$temp_file"; return 1; }
+    
+    # Atomic replace
+    mv -f "$temp_file" "$GH_PROJECT_CONFIG"
+    trap - EXIT
+    
+    # Clear cache when assignments change
+    auto_switch_cache_clear
+}
+
+# Get assigned user for path (with parent directory inheritance)
+project_get_user_by_path() {
+    local check_path="$1"
+    
+    [[ ! -f "$GH_PROJECT_CONFIG" ]] && return 1
+    
+    # Normalize to absolute path
+    check_path=$(cd "$check_path" 2>/dev/null && pwd) || check_path="$1"
+    
+    # Try cache first
+    local cached_user
+    if cached_user=$(auto_switch_cache_read "$check_path" 2>/dev/null); then
+        echo "$cached_user"
+        return 0
+    fi
+    
+    # Look for longest matching path prefix
+    local best_user=""
+    local best_length=0
+    
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip old format lines (no pipe separator)
+        [[ "$line" != *"|"* ]] && continue
+        
+        # Extract path and user (unescape pipe)
+        local stored_path="${line%%|*}"
+        stored_path="${stored_path//\\|/|}"
+        local stored_user="${line#*|}"
+        
+        # Check if current path starts with stored path
+        if [[ "$check_path" == "$stored_path" || "$check_path" == "$stored_path"/* ]]; then
+            local path_length=${#stored_path}
+            if [[ $path_length -gt $best_length ]]; then
+                best_user="$stored_user"
+                best_length=$path_length
+            fi
+        fi
+    done < "$GH_PROJECT_CONFIG"
+    
+    # Cache the result
+    if [[ -n "$best_user" ]]; then
+        auto_switch_cache_write "$check_path" "$best_user"
+        echo "$best_user"
+        return 0
+    fi
+    
+    return 1
 }
 
 # =============================================================================
@@ -947,33 +1097,75 @@ guard_install() {
         done
     fi
     
-    # Create hook with explicit path or search strategy
-    cat > "$hook_file" << EOF
+    # Create self-contained hook
+    cat > "$hook_file" << 'EOF'
 #!/bin/bash
-# GHS_GUARD_HOOK
-[[ "\$GHS_SKIP_HOOK" == "1" ]] && exit 0
+# GHS_GUARD_HOOK v2 - Self-contained
+[[ "$GHS_SKIP_HOOK" == "1" ]] && exit 0
 
-# Try to find ghs in common locations
-GHS_CMD=""
-if command -v ghs >/dev/null 2>&1; then
-    GHS_CMD="ghs"
-elif [[ -x "$ghs_path" ]]; then
-    GHS_CMD="$ghs_path"
-elif [[ -x /usr/local/bin/ghs ]]; then
-    GHS_CMD="/usr/local/bin/ghs"
-elif [[ -x ~/.local/bin/ghs ]]; then
-    GHS_CMD=~/.local/bin/ghs
-elif [[ -x ~/bin/ghs ]]; then
-    GHS_CMD=~/bin/ghs
+# Configuration paths
+GH_PROJECT_CONFIG="${GH_PROJECT_CONFIG:-$HOME/.gh-project-accounts}"
+GH_USER_PROFILES="${GH_USER_PROFILES:-$HOME/.gh-user-profiles}"
+
+# Get repository directory
+repo_dir=$(git rev-parse --show-toplevel 2>/dev/null)
+[[ -z "$repo_dir" ]] && exit 0
+
+# Get repository name
+repo_name=$(basename "$repo_dir")
+
+# Check if this repository has an assigned account
+[[ ! -f "$GH_PROJECT_CONFIG" ]] && exit 0
+assigned_user=$(grep "^${repo_name}=" "$GH_PROJECT_CONFIG" | cut -d= -f2)
+[[ -z "$assigned_user" ]] && exit 0
+
+# Get current GitHub user
+current_user=""
+if command -v gh >/dev/null 2>&1; then
+    current_user=$(gh api user -q .login 2>/dev/null || true)
 fi
 
-if [[ -z "\$GHS_CMD" ]]; then
-    echo "⚠️  ghs not found in PATH or common locations"
-    echo "   Please ensure ghs is installed and in your PATH"
+if [[ -z "$current_user" ]]; then
+    echo "⚠️  Cannot verify GitHub account - gh CLI not authenticated"
+    echo "   Run: gh auth login"
     exit 0
 fi
 
-"\$GHS_CMD" guard test || { echo; echo "💡 To bypass: GHS_SKIP_HOOK=1 git commit ..."; exit 1; }
+# Compare users
+if [[ "$current_user" != "$assigned_user" ]]; then
+    echo "❌ Account mismatch detected!"
+    echo
+    echo "   Repository: $repo_name"
+    echo "   Expected:   $assigned_user"
+    echo "   Current:    $current_user"
+    echo
+    echo "   Switch with: ghs switch $assigned_user"
+    echo "   Or bypass:   GHS_SKIP_HOOK=1 git commit ..."
+    exit 1
+fi
+
+# Check git config matches profile
+if [[ -f "$GH_USER_PROFILES" ]]; then
+    # Look for profile
+    profile_line=$(grep "^${assigned_user}	" "$GH_USER_PROFILES" | head -1)
+    if [[ -n "$profile_line" ]]; then
+        # Parse format: username	name	email	ssh_key	host
+        IFS=$'\t' read -r username name email ssh_key host <<< "$profile_line"
+        
+        # Get current git config
+        current_email=$(git config user.email 2>/dev/null || true)
+        
+        # Verify email matches
+        if [[ -n "$email" ]] && [[ "$current_email" != "$email" ]]; then
+            echo "⚠️  Git email mismatch"
+            echo "   Expected: $email"
+            echo "   Current:  $current_email"
+            echo "   Fix with: git config user.email \"$email\""
+        fi
+    fi
+fi
+
+exit 0
 EOF
     
     chmod +x "$hook_file"
@@ -1384,14 +1576,167 @@ cmd_switch() {
     fi
 }
 
+# List all assignments
+cmd_assign_list() {
+    if [[ ! -f "$GH_PROJECT_CONFIG" ]]; then
+        echo "📋 No directory assignments configured"
+        return 0
+    fi
+    
+    echo "📋 Directory assignments:"
+    echo
+    
+    # Count assignments first
+    local path_count=0
+    local project_count=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" == *"|"* ]]; then
+            ((path_count++))
+        elif [[ -n "$line" ]]; then
+            ((project_count++))
+        fi
+    done < "$GH_PROJECT_CONFIG"
+    
+    # Show path-based assignments
+    if [[ $path_count -gt 0 ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" == *"|"* ]]; then
+                local path="${line%%|*}"
+                path="${path//\\|/|}"
+                local user="${line#*|}"
+                echo "  $path → $user"
+            fi
+        done < "$GH_PROJECT_CONFIG" | sort
+    fi
+    
+    # Show legacy project assignments
+    if [[ $path_count -gt 0 && $project_count -gt 0 ]]; then
+        echo
+        echo "Legacy project assignments:"
+    fi
+    
+    if [[ $project_count -gt 0 ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" != *"|"* && -n "$line" ]]; then
+                local project="${line%%=*}"
+                local user="${line#*=}"
+                echo "  $project → $user"
+            fi
+        done < "$GH_PROJECT_CONFIG" | sort
+    fi
+    
+    if [[ $path_count -eq 0 && $project_count -eq 0 ]]; then
+        echo "  (none)"
+    fi
+}
+
+# Remove assignment for a path
+cmd_assign_remove() {
+    local path="$1"
+    
+    # Normalize path
+    path=$(cd "$path" 2>/dev/null && pwd) || { echo "❌ Invalid path: $path" >&2; return 1; }
+    
+    if [[ ! -f "$GH_PROJECT_CONFIG" ]]; then
+        echo "❌ No assignments to remove" >&2
+        return 1
+    fi
+    
+    # Escape path for grep
+    local escaped_path="${path//|/\\|}"
+    
+    # Check if assignment exists
+    if ! grep -q "^${escaped_path}|" "$GH_PROJECT_CONFIG" 2>/dev/null; then
+        echo "❌ No assignment found for: $path" >&2
+        return 1
+    fi
+    
+    # Remove the assignment
+    local temp_file
+    temp_file=$(mktemp "${GH_PROJECT_CONFIG}.XXXXXX") || return 1
+    
+    grep -v "^${escaped_path}|" "$GH_PROJECT_CONFIG" > "$temp_file" || true
+    mv -f "$temp_file" "$GH_PROJECT_CONFIG"
+    
+    echo "✅ Removed assignment for: $path"
+    
+    # Clear cache
+    auto_switch_cache_clear
+}
+
+# Clean up non-existent paths
+cmd_assign_clean() {
+    if [[ ! -f "$GH_PROJECT_CONFIG" ]]; then
+        echo "📋 No assignments to clean"
+        return 0
+    fi
+    
+    local temp_file
+    temp_file=$(mktemp "${GH_PROJECT_CONFIG}.XXXXXX") || return 1
+    
+    local removed_count=0
+    
+    # Process each line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" == *"|"* ]]; then
+            # Path-based assignment
+            local path="${line%%|*}"
+            path="${path//\\|/|}"
+            
+            if [[ -d "$path" ]]; then
+                echo "$line" >> "$temp_file"
+            else
+                echo "  Removing non-existent path: $path"
+                ((removed_count++))
+            fi
+        else
+            # Keep legacy assignments
+            echo "$line" >> "$temp_file"
+        fi
+    done < "$GH_PROJECT_CONFIG"
+    
+    if [[ $removed_count -gt 0 ]]; then
+        mv -f "$temp_file" "$GH_PROJECT_CONFIG"
+        echo
+        echo "✅ Cleaned up $removed_count non-existent path(s)"
+        
+        # Clear cache
+        auto_switch_cache_clear
+    else
+        rm -f "$temp_file"
+        echo "✅ All paths are valid"
+    fi
+}
+
 # Assign user to project command
 cmd_assign() {
     local input="$1"
+    
+    # Handle special flags
+    case "$input" in
+        --list)
+            cmd_assign_list
+            return $?
+            ;;
+        --remove)
+            local path="${2:-$PWD}"
+            cmd_assign_remove "$path"
+            return $?
+            ;;
+        --clean)
+            cmd_assign_clean
+            return $?
+            ;;
+    esac
+    
     local project="${2:-$(basename "$PWD")}"
     
     if [[ -z "$input" ]]; then
         echo "❌ Username or ID required" >&2
         echo "Usage: ghs assign <username_or_id>" >&2
+        echo "       ghs assign --list" >&2
+        echo "       ghs assign --remove [path]" >&2
+        echo "       ghs assign --clean" >&2
         return 1
     fi
     
@@ -1410,12 +1755,33 @@ cmd_assign() {
         return 1
     fi
     
-    # Assign user to project
-    if project_assign "$username" "$project"; then
-        echo "✅ Assigned $username to project: $project"
+    # Assign user to project or path
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        # In a git repo - use path-based assignment for auto-switch
+        if project_assign_path "$PWD" "$username"; then
+            echo "✅ Assigned $username to directory: $PWD"
+            
+            # Also assign by project name for backwards compatibility
+            project_assign "$username" "$project" >/dev/null 2>&1 || true
+        else
+            echo "❌ Failed to assign user to directory" >&2
+            return 1
+        fi
     else
-        echo "❌ Failed to assign user to project" >&2
-        return 1
+        # Not in git repo - use traditional project assignment
+        if project_assign "$username" "$project"; then
+            echo "✅ Assigned $username to project: $project"
+        else
+            echo "❌ Failed to assign user to project" >&2
+            return 1
+        fi
+    fi
+    
+    # Feature discovery
+    if ! auto_switch_enabled; then
+        echo
+        echo "💡 Enable auto-switch to change profiles automatically:"
+        echo "   ghs auto-switch enable"
     fi
 }
 
@@ -1722,9 +2088,6 @@ cmd_edit_update_profile() {
         if ! _validate_field_length "$new_name" "Name" 200; then
             return 1
         fi
-        if ! _validate_no_pipes "$new_name" "name"; then
-            return 1
-        fi
     fi
     
     # Validate SSH key if changed
@@ -1760,6 +2123,502 @@ cmd_edit_update_profile() {
     fi
     
     return 0
+}
+
+# =============================================================================
+# AUTO-SWITCH FEATURE
+# =============================================================================
+
+# Cache for auto-switch to improve performance
+AUTO_SWITCH_CACHE_DIR="/tmp/.ghs-auto-switch-cache-$USER"
+AUTO_SWITCH_CACHE_TTL=300  # 5 minutes
+
+# Get cache file for a given path
+auto_switch_cache_file() {
+    local path="$1"
+    local hash
+    hash=$(echo -n "$path" | sha256sum | cut -c1-16)
+    echo "$AUTO_SWITCH_CACHE_DIR/path-$hash"
+}
+
+# Read from cache if valid
+auto_switch_cache_read() {
+    local path="$1"
+    local cache_file
+    cache_file=$(auto_switch_cache_file "$path")
+    
+    [[ -f "$cache_file" ]] || return 1
+    
+    # Check if cache is still valid (modified within TTL)
+    local now cache_time age
+    now=$(date +%s)
+    cache_time=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0)
+    age=$((now - cache_time))
+    
+    [[ $age -lt $AUTO_SWITCH_CACHE_TTL ]] || return 1
+    
+    cat "$cache_file"
+}
+
+# Write to cache
+auto_switch_cache_write() {
+    local path="$1"
+    local user="$2"
+    
+    mkdir -p "$AUTO_SWITCH_CACHE_DIR" 2>/dev/null || return 0
+    
+    local cache_file
+    cache_file=$(auto_switch_cache_file "$path")
+    echo "$user" > "$cache_file" 2>/dev/null || true
+}
+
+# Clear cache (when assignments change)
+auto_switch_cache_clear() {
+    rm -rf "$AUTO_SWITCH_CACHE_DIR" 2>/dev/null || true
+}
+
+# Check if auto-switch is enabled
+auto_switch_enabled() {
+    [[ -f "$HOME/.ghs-auto-switch-enabled" ]]
+}
+
+# Auto-switch main command
+cmd_auto_switch() {
+    local subcmd="${1:-status}"
+    shift 2>/dev/null || true
+    
+    case "$subcmd" in
+        enable)
+            auto_switch_enable "$@"
+            ;;
+        disable)
+            auto_switch_disable "$@"
+            ;;
+        status)
+            auto_switch_status "$@"
+            ;;
+        test)
+            auto_switch_test "$@"
+            ;;
+        check)
+            # Support --debug flag
+            if [[ "${1:-}" == "--debug" ]]; then
+                shift
+                auto_switch_check_debug "$@"
+            else
+                auto_switch_check "$@"
+            fi
+            ;;
+        *)
+            echo "Usage: ghs auto-switch <enable|disable|status|test>"
+            echo
+            echo "Automatic profile switching based on directory"
+            echo
+            echo "Commands:"
+            echo "  enable    Turn on automatic profile switching"
+            echo "  disable   Turn off automatic profile switching"
+            echo "  status    Show current auto-switch configuration"
+            echo "  test      Preview what would happen in current directory"
+            return 1
+            ;;
+    esac
+}
+
+# Enable auto-switching
+auto_switch_enable() {
+    # Create flag file
+    touch "$HOME/.ghs-auto-switch-enabled"
+    
+    echo "✅ Auto-switch enabled!"
+    echo
+    echo "Next steps:"
+    
+    # Detect shell and provide instructions
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        echo "1. Restart your shell or run: source ~/.zshrc"
+        
+        # Check if hook already installed
+        if ! grep -q "ghs_auto_switch" ~/.zshrc 2>/dev/null; then
+            echo "2. Add to your ~/.zshrc:"
+            echo
+            echo '# gh-switcher auto-switch'
+            echo 'ghs_auto_switch() {'
+            echo '    [[ -f ~/.ghs-auto-switch-enabled ]] || return'
+            echo '    command -v ghs >/dev/null 2>&1 || return'
+            echo '    ghs auto-switch check --quiet'
+            echo '}'
+            echo 'autoload -U add-zsh-hook'
+            echo 'add-zsh-hook chpwd ghs_auto_switch'
+        fi
+    elif [[ -n "${BASH_VERSION:-}" ]]; then
+        echo "1. Restart your shell or run: source ~/.bashrc"
+        
+        # Check if hook already installed
+        if ! grep -q "ghs_auto_switch" ~/.bashrc 2>/dev/null; then
+            echo "2. Add to your ~/.bashrc:"
+            echo
+            echo '# gh-switcher auto-switch'
+            echo 'ghs_auto_switch() {'
+            echo '    [[ -f ~/.ghs-auto-switch-enabled ]] || return'
+            echo '    command -v ghs >/dev/null 2>&1 || return'
+            # shellcheck disable=SC2016
+            echo '    [[ "$PWD" != "$GHS_LAST_DIR" ]] || return'
+            # shellcheck disable=SC2016
+            echo '    export GHS_LAST_DIR="$PWD"'
+            echo '    ghs auto-switch check --quiet'
+            echo '}'
+            # shellcheck disable=SC2016,SC2028
+            echo 'PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND$'"'"'\n'"'"'}ghs_auto_switch"'
+        fi
+    else
+        echo "1. Add the auto-switch hook to your shell configuration"
+    fi
+    
+    echo "3. Your profile will automatically switch when entering assigned directories"
+    echo "4. Run 'ghs auto-switch test' to preview behavior"
+    echo
+    echo "💡 Tip: Auto-switch respects parent directories. Assign to ~/work to cover all subdirectories."
+}
+
+# Disable auto-switching
+auto_switch_disable() {
+    rm -f "$HOME/.ghs-auto-switch-enabled"
+    echo "✅ Auto-switch disabled"
+    echo
+    echo "Note: The shell hook remains installed but inactive."
+    echo "To fully remove, delete the ghs_auto_switch function from your shell config."
+}
+
+# Show auto-switch status
+auto_switch_status() {
+    echo "🔄 Auto-Switch Status"
+    echo
+    
+    if auto_switch_enabled; then
+        echo "Status: ENABLED ✅"
+        
+        # Count assignments
+        if [[ -f "$GH_PROJECT_CONFIG" ]]; then
+            local path_count=0
+            local project_count=0
+            while IFS= read -r line || [[ -n "$line" ]]; do
+                if [[ "$line" == *"|"* ]]; then
+                    ((path_count++))
+                else
+                    ((project_count++))
+                fi
+            done < "$GH_PROJECT_CONFIG"
+            
+            echo "Assigned directories: $path_count"
+            [[ $project_count -gt 0 ]] && echo "Legacy projects: $project_count"
+        else
+            echo "Assigned directories: 0"
+        fi
+        
+        # Check shell hook
+        local shell_config=""
+        [[ -n "${ZSH_VERSION:-}" ]] && shell_config="$HOME/.zshrc"
+        [[ -n "${BASH_VERSION:-}" ]] && shell_config="$HOME/.bashrc"
+        
+        if [[ -n "$shell_config" ]] && grep -q "ghs_auto_switch" "$shell_config" 2>/dev/null; then
+            echo "Shell hook: Installed ✅"
+        else
+            echo "Shell hook: Not installed ⚠️"
+            echo "             Run 'ghs auto-switch enable' for instructions"
+        fi
+    else
+        echo "Status: DISABLED ⭕"
+        echo
+        echo "Enable with: ghs auto-switch enable"
+    fi
+}
+
+# Test what auto-switch would do
+auto_switch_test() {
+    local current_dir="$PWD"
+    local current_repo
+    current_repo=$(git_get_repo 2>/dev/null) || current_repo=$(basename "$PWD")
+    
+    echo "🔍 Auto-switch test for: $current_dir"
+    echo
+    
+    # Check if enabled
+    if auto_switch_enabled; then
+        echo "✓ Auto-switch is enabled"
+    else
+        echo "✗ Auto-switch is disabled"
+        echo "  Enable with: ghs auto-switch enable"
+        return 0
+    fi
+    
+    # Check for assignment using new path-based lookup
+    local assigned_user=""
+    local assigned_from=""
+    
+    # Try path-based lookup first
+    if assigned_user=$(project_get_user_by_path "$PWD" 2>/dev/null); then
+        # Find which path it was assigned from
+        local check_path="$PWD"
+        while [[ -n "$check_path" && "$check_path" != "/" ]]; do
+            if grep -q "^${check_path//|/\\|}|" "$GH_PROJECT_CONFIG" 2>/dev/null; then
+                assigned_from="$check_path"
+                break
+            fi
+            check_path=$(dirname "$check_path")
+        done
+        
+        if [[ "$assigned_from" != "$PWD" ]]; then
+            echo "✓ Found assignment: $assigned_user (inherited from $assigned_from)"
+        else
+            echo "✓ Found assignment: $assigned_user"
+        fi
+    else
+        # Fall back to old project-based lookup
+        assigned_user=$(project_get_user "$current_repo" 2>/dev/null) || true
+        [[ -n "$assigned_user" ]] && echo "✓ Found assignment: $assigned_user (project: $current_repo)"
+    fi
+    
+    if [[ -z "$assigned_user" ]]; then
+        echo "✗ No assignment found for this directory"
+        echo "  Assign with: ghs assign <user>"
+        return 0
+    fi
+    
+    # Check current profile
+    local current_email
+    current_email=$(git config user.email 2>/dev/null || git config --global user.email 2>/dev/null)
+    
+    local profile
+    if profile=$(profile_get "$assigned_user" 2>/dev/null); then
+        local profile_email
+        profile_email=$(profile_get_field "$profile" "email")
+        
+        if [[ "$profile_email" == "$current_email" ]]; then
+            echo "✓ Current profile: $assigned_user (already active)"
+            echo
+            echo "Result: No switch needed"
+        else
+            echo "✓ Current profile: Different from assigned"
+            echo
+            echo "Result: Would switch to $assigned_user"
+            echo "Run 'cd .' to trigger actual switch"
+        fi
+    else
+        echo "✗ Profile missing for $assigned_user"
+        echo "  Create with: ghs edit $assigned_user"
+    fi
+    
+    # Check for git operations
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        if [[ -f ".git/rebase-merge/interactive" || -f ".git/MERGE_HEAD" || -f ".git/CHERRY_PICK_HEAD" ]]; then
+            echo "✓ Git operation in progress - switch would be delayed"
+        else
+            echo "✓ No git operations in progress"
+        fi
+    fi
+}
+
+# Debug version of auto-switch check
+auto_switch_check_debug() {
+    echo "[DEBUG] Auto-switch check started"
+    echo "[DEBUG] Current dir: $PWD"
+    echo "[DEBUG] Environment:"
+    echo "[DEBUG]   GHS_LAST_DIR: ${GHS_LAST_DIR:-<not set>}"
+    echo "[DEBUG]   Auto-switch enabled: $(auto_switch_enabled && echo "yes" || echo "no")"
+    
+    # Check if enabled
+    if ! auto_switch_enabled; then
+        echo "[DEBUG] Auto-switch is not enabled, exiting"
+        return 0
+    fi
+    
+    # Check PWD change for Bash
+    if [[ -n "${GHS_LAST_DIR:-}" && "$PWD" == "$GHS_LAST_DIR" ]]; then
+        echo "[DEBUG] PWD hasn't changed (Bash optimization), exiting"
+        return 0
+    fi
+    
+    # Check git repo
+    if ! git rev-parse --git-dir >/dev/null 2>&1; then
+        echo "[DEBUG] Not in a git repository, exiting"
+        return 0
+    fi
+    
+    echo "[DEBUG] In git repository"
+    
+    # Check for git operations
+    if [[ -f ".git/rebase-merge/interactive" || -f ".git/MERGE_HEAD" || -f ".git/CHERRY_PICK_HEAD" ]]; then
+        echo "[DEBUG] Git operation in progress:"
+        [[ -f ".git/rebase-merge/interactive" ]] && echo "[DEBUG]   - Interactive rebase"
+        [[ -f ".git/MERGE_HEAD" ]] && echo "[DEBUG]   - Merge"
+        [[ -f ".git/CHERRY_PICK_HEAD" ]] && echo "[DEBUG]   - Cherry-pick"
+        echo "⚠️  Auto-switch delayed: git operation in progress"
+        return 0
+    fi
+    
+    echo "[DEBUG] No git operations in progress"
+    
+    # Look for assignment
+    echo "[DEBUG] Looking for assignment..."
+    local assigned_user=""
+    
+    # Try cache first
+    local cached_user
+    if cached_user=$(auto_switch_cache_read "$PWD" 2>/dev/null); then
+        echo "[DEBUG]   Cache hit: $cached_user"
+        assigned_user="$cached_user"
+    else
+        echo "[DEBUG]   Cache miss, checking config file"
+        
+        # Try path-based lookup
+        if assigned_user=$(project_get_user_by_path "$PWD" 2>/dev/null); then
+            echo "[DEBUG]   Found path-based assignment: $assigned_user"
+            
+            # Find which path it came from
+            local check_path="$PWD"
+            while [[ -n "$check_path" && "$check_path" != "/" ]]; do
+                if grep -q "^${check_path//|/\\|}|" "$GH_PROJECT_CONFIG" 2>/dev/null; then
+                    echo "[DEBUG]   Assigned from: $check_path"
+                    break
+                fi
+                check_path=$(dirname "$check_path")
+            done
+        else
+            # Try project-based lookup
+            local current_repo
+            current_repo=$(git_get_repo 2>/dev/null) || current_repo=$(basename "$PWD")
+            echo "[DEBUG]   Checking project-based assignment for: $current_repo"
+            
+            if assigned_user=$(project_get_user "$current_repo" 2>/dev/null); then
+                echo "[DEBUG]   Found project assignment: $assigned_user"
+            else
+                echo "[DEBUG]   No assignment found"
+            fi
+        fi
+    fi
+    
+    if [[ -z "$assigned_user" ]]; then
+        echo "[DEBUG] No user assigned to this directory"
+        return 0
+    fi
+    
+    # Check current profile
+    echo "[DEBUG] Assigned user: $assigned_user"
+    local current_email
+    current_email=$(git config user.email 2>/dev/null || git config --global user.email 2>/dev/null)
+    echo "[DEBUG] Current git email: ${current_email:-<not set>}"
+    
+    # Get profile
+    local profile
+    if ! profile=$(profile_get "$assigned_user" 2>/dev/null); then
+        echo "[DEBUG] Profile not found for user: $assigned_user"
+        echo "❌ Auto-switch failed: missing profile for $assigned_user"
+        return 1
+    fi
+    
+    local profile_email
+    profile_email=$(profile_get_field "$profile" "email")
+    echo "[DEBUG] Profile email: $profile_email"
+    
+    # Check if already on correct profile
+    if [[ "$profile_email" == "$current_email" ]]; then
+        echo "[DEBUG] Already on correct profile"
+        return 0
+    fi
+    
+    # Check for manual override
+    if git config --local user.email >/dev/null 2>&1; then
+        local manual_email
+        manual_email=$(git config --local user.email)
+        echo "[DEBUG] Found local git config: $manual_email"
+        
+        if [[ "$manual_email" != "$profile_email" ]]; then
+            echo "[DEBUG] Manual override detected, not switching"
+            echo "ℹ️  Skipping auto-switch: manual git config detected"
+            echo "   Run 'ghs switch $assigned_user' to override"
+            return 0
+        fi
+    fi
+    
+    # Perform the switch
+    echo "[DEBUG] Performing switch to: $assigned_user"
+    if profile_apply "$assigned_user" "local" >/dev/null 2>&1; then
+        echo "[DEBUG] Switch successful"
+        echo "🔄 Switched to $assigned_user (auto)"
+    else
+        echo "[DEBUG] Switch failed"
+        echo "❌ Auto-switch failed for $assigned_user"
+        return 1
+    fi
+}
+
+# Perform the actual check and switch (called by shell hook)
+auto_switch_check() {
+    local quiet=false
+    [[ "${1:-}" == "--quiet" ]] && quiet=true
+    
+    # Fast path: not enabled
+    auto_switch_enabled || return 0
+    
+    # Fast path: Bash PWD hasn't changed (set by shell hook)
+    if [[ -n "${GHS_LAST_DIR:-}" && "$PWD" == "$GHS_LAST_DIR" ]]; then
+        return 0
+    fi
+    
+    # Fast path: not in git repo
+    git rev-parse --git-dir >/dev/null 2>&1 || return 0
+    
+    # Check for active git operations
+    if [[ -f ".git/rebase-merge/interactive" || -f ".git/MERGE_HEAD" || -f ".git/CHERRY_PICK_HEAD" ]]; then
+        [[ "$quiet" == "true" ]] || echo "⚠️  Auto-switch delayed: git operation in progress"
+        return 0
+    fi
+    
+    # Find assigned user using path-based lookup first
+    local assigned_user=""
+    assigned_user=$(project_get_user_by_path "$PWD" 2>/dev/null) || {
+        # Fall back to old project-based lookup for backwards compatibility
+        local current_repo
+        current_repo=$(git_get_repo 2>/dev/null) || current_repo=$(basename "$PWD")
+        assigned_user=$(project_get_user "$current_repo" 2>/dev/null) || true
+    }
+    
+    # No assignment found
+    [[ -z "$assigned_user" ]] && return 0
+    
+    # Check if already on correct profile
+    local current_email
+    current_email=$(git config user.email 2>/dev/null || git config --global user.email 2>/dev/null)
+    
+    local profile
+    profile=$(profile_get "$assigned_user" 2>/dev/null) || return 0
+    
+    local profile_email
+    profile_email=$(profile_get_field "$profile" "email")
+    
+    # Already on correct profile
+    [[ "$profile_email" == "$current_email" ]] && return 0
+    
+    # Check for manual override
+    if git config --local user.email >/dev/null 2>&1; then
+        local manual_email
+        manual_email=$(git config --local user.email)
+        if [[ "$manual_email" != "$profile_email" ]]; then
+            [[ "$quiet" == "true" ]] || {
+                echo "ℹ️  Skipping auto-switch: manual git config detected"
+                echo "   Run 'ghs switch $assigned_user' to override"
+            }
+            return 0
+        fi
+    fi
+    
+    # Perform the switch
+    if profile_apply "$assigned_user" "local" >/dev/null 2>&1; then
+        [[ "$quiet" == "true" ]] || echo "🔄 Switched to $assigned_user (auto)"
+    else
+        [[ "$quiet" == "true" ]] || echo "❌ Auto-switch failed for $assigned_user"
+        return 1
+    fi
 }
 
 # Status command
@@ -1810,6 +2669,9 @@ cmd_status() {
     # Display header
     echo "📍 Current project: $project"
     echo "🔐 GitHub CLI user: $gh_user"
+    if auto_switch_enabled; then
+        echo "🔄 Auto-switch: ENABLED"
+    fi
     echo
     
     # Display users with flags
@@ -2077,12 +2939,16 @@ COMMANDS:
   remove <user>       Remove account by name or number
   switch <user>       Change active git config to different account
   assign <user>       Auto-switch to this account in current directory
+  assign --list       List all directory assignments
+  assign --remove     Remove assignment for current or specified path
+  assign --clean      Clean up non-existent paths
   users               List all accounts with SSH/HTTPS status
   show <user>         View account details and diagnose issues      [NEW]
   edit <user>         Update email, SSH key, or host settings      [NEW]
   test-ssh [<user>]   Verify SSH key works with GitHub            [NEW]
   status              Show current account and project state (default)
   guard               Prevent wrong-account commits (see 'ghs guard')
+  auto-switch         Automatic profile switching by directory      [NEW]
   help                Show this help message
 
 OPTIONS:
@@ -2098,6 +2964,11 @@ EXAMPLES:
   ghs switch 1
   ghs assign alice
   ghs status
+
+AUTO-SWITCHING:
+  ghs auto-switch enable     Turn on automatic profile switching
+  ghs auto-switch test       Preview what would happen in current directory
+  ghs auto-switch status     Check configuration and assigned directories
 EOF
     return 0
 }
@@ -2126,6 +2997,7 @@ ghs() {
         show|profile)     cmd_show "$@" ;;      # NEW
         edit)             cmd_edit "$@" ;;       # NEW
         test-ssh)         cmd_test_ssh "$@" ;;   # NEW
+        auto-switch)      cmd_auto_switch "$@" ;; # NEW
         status)           cmd_status "$@" ;;
         guard)            cmd_guard "$@" ;;
         help|--help|-h)   cmd_help ;;

@@ -40,7 +40,7 @@ teardown() {
 
 @test "pre-flight check in switch command" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com|/missing/key|github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com	/missing/key	github.com" >> "$GH_USER_PROFILES"
     
     # Create a test git repo
     mkdir -p "$TEST_HOME/test-repo"
@@ -66,7 +66,7 @@ teardown() {
     
     # Create user with missing SSH
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com|/missing/key|github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com	/missing/key	github.com" >> "$GH_USER_PROFILES"
     
     run ghs status
     assert_success
@@ -97,7 +97,7 @@ teardown() {
 
 @test "show command detects git config mismatch for active user" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     # Mock gh to return alice as current user
     function gh() {
@@ -124,7 +124,7 @@ teardown() {
 
 @test "edit suggests reapply for active user" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     # Mock gh to return alice as current user
     function gh() {
@@ -142,7 +142,7 @@ teardown() {
 
 @test "dispatcher handles new commands" {
     echo "alice" >> "$GH_USERS_CONFIG"
-    echo "alice|v4|Alice|alice@example.com||github.com" >> "$GH_USER_PROFILES"
+    echo "alice	Alice	alice@example.com		github.com" >> "$GH_USER_PROFILES"
     
     # Test show command
     run ghs show alice
@@ -169,7 +169,7 @@ teardown() {
 
 @test "multiple SSH key suggestions prioritize username matches" {
     echo "work" >> "$GH_USERS_CONFIG"
-    echo "work|v4|Work|work@company.com|$TEST_HOME/.ssh/old_work|github.com" >> "$GH_USER_PROFILES"
+    echo "work	Work	work@company.com	$TEST_HOME/.ssh/old_work	github.com" >> "$GH_USER_PROFILES"
     
     # Create various SSH keys
     mkdir -p "$TEST_HOME/.ssh"
@@ -187,7 +187,7 @@ teardown() {
 
 @test "email typo detection skips bot accounts" {
     echo "dependabot" >> "$GH_USERS_CONFIG"
-    echo "dependabot|v4|Bot|dependabot@github.com||github.com" >> "$GH_USER_PROFILES"
+    echo "dependabot	Bot	dependabot@github.com		github.com" >> "$GH_USER_PROFILES"
     
     run ghs show dependabot
     assert_success
