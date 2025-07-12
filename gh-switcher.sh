@@ -39,22 +39,6 @@ init_config() {
     [[ -f "$GH_PROJECT_CONFIG" ]] || touch "$GH_PROJECT_CONFIG"
 }
 
-# Check if migration from v4 to v5 is needed
-check_migration_needed() {
-    # Skip check for help command
-    local cmd="${1:-}"
-    [[ "$cmd" == "help" ]] || [[ "$cmd" == "--help" ]] || [[ "$cmd" == "-h" ]] && return 0
-    
-    # Skip if profile file doesn't exist
-    [[ ! -f "$GH_USER_PROFILES" ]] && return 0
-    
-    # Check for v4 profiles
-    if grep -q "|v4|" "$GH_USER_PROFILES" 2>/dev/null; then
-        echo "⚠️  Found v4 format profiles that need migration" >&2
-        echo "   Run 'ghs migrate' to update to v5 format" >&2
-        echo "" >&2
-    fi
-}
 
 # =============================================================================
 # FILE UTILITIES
@@ -2910,84 +2894,6 @@ cmd_test_ssh() {
     return $exit_code
 }
 
-# Migrate profiles from v4 to v5 format
-cmd_migrate() {
-    echo "🔄 Migrating profiles from v4 to v5 format..."
-    
-    # Check if profile file exists
-    if [[ ! -f "$GH_USER_PROFILES" ]]; then
-        echo "✅ No profile file found - nothing to migrate"
-        return 0
-    fi
-    
-    # Check if migration needed
-    if ! grep -q "|v4|" "$GH_USER_PROFILES" 2>/dev/null; then
-        echo "✅ No v4 profiles found - migration not needed"
-        return 0
-    fi
-    
-    # Count v4 profiles
-    local v4_count
-    v4_count=$(grep -c "|v4|" "$GH_USER_PROFILES" || true)
-    echo "📊 Found $v4_count v4 profile(s) to migrate"
-    
-    # Backup existing profiles
-    local backup_file="${GH_USER_PROFILES}.v4.backup"
-    cp "$GH_USER_PROFILES" "$backup_file"
-    echo "📦 Backed up to $backup_file"
-    
-    # Perform migration
-    local temp_file
-    temp_file=$(mktemp) || return 1
-    local migrated=0
-    local line_num=0
-    
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        ((line_num++))
-        if [[ "$line" == *"|v4|"* ]]; then
-            # Parse v4 format: username|v4|name|email|ssh_key|host
-            local username version name email ssh_key host
-            IFS='|' read -r username version name email ssh_key host <<< "$line"
-            
-            if [[ "$version" == "v4" ]]; then
-                # Validate parsed data
-                if [[ -z "$username" ]] || [[ -z "$name" ]] || [[ -z "$email" ]]; then
-                    echo "⚠️  Line $line_num: Skipping invalid profile (missing required fields)"
-                    continue
-                fi
-                
-                # Write v5 format: username\tv5\tname\temail\tssh_key\thost
-                printf "%s\tv5\t%s\t%s\t%s\t%s\n" \
-                    "$username" "$name" "$email" "$ssh_key" "${host:-github.com}" >> "$temp_file"
-                ((migrated++))
-                echo "  ✓ Migrated: $username"
-            else
-                # Keep non-v4 lines as-is
-                echo "$line" >> "$temp_file"
-            fi
-        else
-            # Keep non-profile lines as-is (like v5 profiles)
-            echo "$line" >> "$temp_file"
-        fi
-    done < "$GH_USER_PROFILES"
-    
-    # Replace file with migrated version
-    if mv "$temp_file" "$GH_USER_PROFILES"; then
-        echo
-        echo "✅ Successfully migrated $migrated profile(s) to v5 format"
-        echo "💡 Original profiles backed up to: $backup_file"
-        
-        # Show current profiles
-        echo
-        echo "Current profiles:"
-        cmd_users
-    else
-        echo "❌ Failed to write migrated profiles"
-        rm -f "$temp_file"
-        return 1
-    fi
-}
-
 # Guard hooks command
 cmd_guard() {
     local subcommand="${1:-}"
@@ -3064,7 +2970,6 @@ COMMANDS:
   status              Show current account and project state (default)
   guard               Prevent wrong-account commits (see 'ghs guard')
   auto-switch         Automatic profile switching by directory      [NEW]
-  migrate             Migrate profiles from v4 to v5 format         [NEW]
   help                Show this help message
 
 OPTIONS:
@@ -3104,11 +3009,6 @@ ghs() {
     # Initialize configuration
     init_config
     
-    # Check if migration is needed (except for help/migrate commands)
-    if [[ "$cmd" != "help" ]] && [[ "$cmd" != "migrate" ]]; then
-        check_migration_needed "$cmd"
-    fi
-    
     case "$cmd" in
         add)              cmd_add "$@" ;;
         remove|rm)        cmd_remove "$@" ;;
@@ -3121,7 +3021,6 @@ ghs() {
         auto-switch)      cmd_auto_switch "$@" ;; # NEW
         status)           cmd_status "$@" ;;
         guard)            cmd_guard "$@" ;;
-        migrate)          cmd_migrate "$@" ;;    # NEW
         help|--help|-h)   cmd_help ;;
         *)                
             echo "❌ Unknown command: $cmd"
