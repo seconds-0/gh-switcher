@@ -107,9 +107,10 @@ teardown() {
     # When
     run profile_get "testuser"
     
-    # Then - should fail as v4 is not supported
+    # Then - should fail as v4 is not supported (profile not found)
     assert_failure
-    assert_output_contains "Found v4 format profile - migration needed"
+    # No specific output expected - v4 profiles are simply ignored
+    [ -z "$output" ]
 }
 
 @test "multiple profiles can coexist" {

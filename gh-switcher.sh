@@ -518,10 +518,7 @@ profile_create() {
     _validate_email "$email" || return 1
     validate_host "$host" || return 1
     
-    # Note: We use clean sweep instead of v4→v5 migration because:
-    # 1. User confirmed they are the only user
-    # 2. Simpler than maintaining migration code  
-    # 3. Consistent with project's "simple over complex" philosophy
+    # Note: Only v5 tab-delimited format is supported
     
     # Perform the profile creation with file locking
     with_file_lock "$GH_USER_PROFILES" _profile_create_locked "$username" "$name" "$email" "$ssh_key" "$host"
@@ -539,17 +536,6 @@ profile_get() {
     local profile_line
     # Look for v5 (tab-delimited) format
     profile_line=$(grep "^${username}	" "$GH_USER_PROFILES" | head -1)
-    
-    # Also check for v4 (pipe-delimited) format to give proper error
-    if [[ -z "$profile_line" ]]; then
-        local v4_line
-        v4_line=$(grep "^${username}|" "$GH_USER_PROFILES" | head -1)
-        if [[ -n "$v4_line" ]]; then
-            echo "❌ Found v4 format profile - migration needed" >&2
-            return 1
-        fi
-    fi
-    
     [[ -n "$profile_line" ]] || return 1
     
     # Parse v5 tab-delimited format (handle empty fields correctly)
@@ -611,8 +597,8 @@ _profile_remove_locked() {
     local temp_file
     temp_file=$(mktemp "${GH_USER_PROFILES}.XXXXXX") || return 1
     
-    # Copy all profiles except the one being removed (support both v4 and v5 formats)
-    grep -v "^${username}	" "$GH_USER_PROFILES" | grep -v "^${username}|" > "$temp_file" || true
+    # Copy all profiles except the one being removed
+    grep -v "^${username}	" "$GH_USER_PROFILES" > "$temp_file" || true
     
     # Atomic replace
     mv -f "$temp_file" "$GH_USER_PROFILES"
