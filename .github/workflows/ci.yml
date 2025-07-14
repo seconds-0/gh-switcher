@@ -32,7 +32,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y shellcheck
+          sudo apt-get install -y shellcheck zsh
           # Install bats-core from official Ubuntu repos (available in 22.04+)
           sudo apt-get install -y bats || {
             # Fallback: install from GitHub releases
@@ -46,6 +46,8 @@ jobs:
         run: |
           brew update
           brew install shellcheck bats-core
+          # zsh is pre-installed on macOS but ensure it's available
+          which zsh || brew install zsh
 
       # Install npm dependencies (none yet, but future-proof)
       - name: Install npm dependencies

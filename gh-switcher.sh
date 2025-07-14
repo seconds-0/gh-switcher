@@ -19,13 +19,26 @@
 # Enable strict mode but allow it to be disabled for testing
 [[ "${GHS_STRICT_MODE:-true}" == "true" ]] && set -euo pipefail
 
+# Handle VSCode shell integration variables to prevent unset variable errors
+: "${VSCODE_SHELL_ENV_REPORTING:=}"
+
+# Handle common environment variables that might be unset
+: "${USER:=$(whoami 2>/dev/null || echo "user")}"
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-readonly GH_USERS_CONFIG="${GH_USERS_CONFIG:-$HOME/.gh-users}"
-readonly GH_USER_PROFILES="${GH_USER_PROFILES:-$HOME/.gh-user-profiles}"
-readonly GH_PROJECT_CONFIG="${GH_PROJECT_CONFIG:-$HOME/.gh-project-accounts}"
+# Only set readonly if not already set (allows multiple sourcing)
+if [[ -z "${GH_USERS_CONFIG:-}" ]]; then
+    readonly GH_USERS_CONFIG="$HOME/.gh-users"
+fi
+if [[ -z "${GH_USER_PROFILES:-}" ]]; then
+    readonly GH_USER_PROFILES="$HOME/.gh-user-profiles"
+fi
+if [[ -z "${GH_PROJECT_CONFIG:-}" ]]; then
+    readonly GH_PROJECT_CONFIG="$HOME/.gh-project-accounts"
+fi
 
 # Initialize configuration files
 init_config() {
@@ -147,7 +160,8 @@ file_append_line() {
 file_remove_line() {
     local filepath="$1"
     local line="$2"
-    local temp_file="${filepath}.tmp.$$"
+    local temp_file
+    temp_file=$(mktemp "${filepath}.XXXXXX") || return 1
     
     [[ -f "$filepath" ]] || return 1
     
@@ -666,17 +680,17 @@ project_get_user() {
 # Path-based assignment functions (for directory auto-switch)
 # Store full path assignments: /Users/alice/work=alice-work
 project_assign_path() {
-    local path="$1"
+    local dir_path="$1"
     local username="$2"
     
     validate_username "$username" || return 1
     user_exists "$username" || return 1
     
     # Normalize path (resolve to absolute)
-    path=$(cd "$path" 2>/dev/null && pwd) || { echo "❌ Invalid path: $path" >&2; return 1; }
+    dir_path=$(cd "$dir_path" 2>/dev/null && pwd) || { echo "❌ Invalid path: $dir_path" >&2; return 1; }
     
     # Escape path for safe storage (replace | with \|)
-    local escaped_path="${path//|/\\|}"
+    local escaped_path="${dir_path//|/\\|}"
     
     # Remove existing assignment and add new one (atomic operation)
     local temp_file
@@ -916,7 +930,7 @@ check_ssh_key_status() {
                 echo "      $i. ${key/#$HOME/~}$key_info"
                 echo "         ghs edit $username --ssh-key '$key'"
                 echo
-                ((i++))
+                i=$((i + 1))
             done
             
             echo "      Or use HTTPS instead:"
@@ -1591,9 +1605,9 @@ cmd_assign_list() {
     local project_count=0
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" == *"|"* ]]; then
-            ((path_count++))
+            path_count=$((path_count + 1))
         elif [[ -n "$line" ]]; then
-            ((project_count++))
+            project_count=$((project_count + 1))
         fi
     done < "$GH_PROJECT_CONFIG"
     
@@ -1601,10 +1615,10 @@ cmd_assign_list() {
     if [[ $path_count -gt 0 ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
             if [[ "$line" == *"|"* ]]; then
-                local path="${line%%|*}"
-                path="${path//\\|/|}"
+                local dir_path="${line%%|*}"
+                dir_path="${dir_path//\\|/|}"
                 local user="${line#*|}"
-                echo "  $path → $user"
+                echo "  $dir_path → $user"
             fi
         done < "$GH_PROJECT_CONFIG" | sort
     fi
@@ -1632,10 +1646,10 @@ cmd_assign_list() {
 
 # Remove assignment for a path
 cmd_assign_remove() {
-    local path="$1"
+    local dir_path="$1"
     
     # Normalize path
-    path=$(cd "$path" 2>/dev/null && pwd) || { echo "❌ Invalid path: $path" >&2; return 1; }
+    dir_path=$(cd "$dir_path" 2>/dev/null && pwd) || { echo "❌ Invalid path: $dir_path" >&2; return 1; }
     
     if [[ ! -f "$GH_PROJECT_CONFIG" ]]; then
         echo "❌ No assignments to remove" >&2
@@ -1643,11 +1657,11 @@ cmd_assign_remove() {
     fi
     
     # Escape path for grep
-    local escaped_path="${path//|/\\|}"
+    local escaped_path="${dir_path//|/\\|}"
     
     # Check if assignment exists
     if ! grep -q "^${escaped_path}|" "$GH_PROJECT_CONFIG" 2>/dev/null; then
-        echo "❌ No assignment found for: $path" >&2
+        echo "❌ No assignment found for: $dir_path" >&2
         return 1
     fi
     
@@ -1658,7 +1672,7 @@ cmd_assign_remove() {
     grep -v "^${escaped_path}|" "$GH_PROJECT_CONFIG" > "$temp_file" || true
     mv -f "$temp_file" "$GH_PROJECT_CONFIG"
     
-    echo "✅ Removed assignment for: $path"
+    echo "✅ Removed assignment for: $dir_path"
     
     # Clear cache
     auto_switch_cache_clear
@@ -1680,14 +1694,14 @@ cmd_assign_clean() {
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" == *"|"* ]]; then
             # Path-based assignment
-            local path="${line%%|*}"
-            path="${path//\\|/|}"
+            local dir_path="${line%%|*}"
+            dir_path="${dir_path//\\|/|}"
             
-            if [[ -d "$path" ]]; then
+            if [[ -d "$dir_path" ]]; then
                 echo "$line" >> "$temp_file"
             else
-                echo "  Removing non-existent path: $path"
-                ((removed_count++))
+                echo "  Removing non-existent path: $dir_path"
+                removed_count=$((removed_count + 1))
             fi
         else
             # Keep legacy assignments
@@ -1719,8 +1733,8 @@ cmd_assign() {
             return $?
             ;;
         --remove)
-            local path="${2:-$PWD}"
-            cmd_assign_remove "$path"
+            local dir_path="${2:-$PWD}"
+            cmd_assign_remove "$dir_path"
             return $?
             ;;
         --clean)
@@ -1816,7 +1830,7 @@ cmd_users() {
             fi
             
             echo "  $i. $username$profile_info$host_info"
-            ((i++))
+            i=$((i + 1))
         fi
     done < "$GH_USERS_CONFIG"
     return 0
@@ -2135,17 +2149,17 @@ AUTO_SWITCH_CACHE_TTL=300  # 5 minutes
 
 # Get cache file for a given path
 auto_switch_cache_file() {
-    local path="$1"
+    local dir_path="$1"
     local hash
-    hash=$(echo -n "$path" | sha256sum | cut -c1-16)
+    hash=$(echo -n "$dir_path" | sha256sum | cut -c1-16)
     echo "$AUTO_SWITCH_CACHE_DIR/path-$hash"
 }
 
 # Read from cache if valid
 auto_switch_cache_read() {
-    local path="$1"
+    local dir_path="$1"
     local cache_file
-    cache_file=$(auto_switch_cache_file "$path")
+    cache_file=$(auto_switch_cache_file "$dir_path")
     
     [[ -f "$cache_file" ]] || return 1
     
@@ -2162,13 +2176,13 @@ auto_switch_cache_read() {
 
 # Write to cache
 auto_switch_cache_write() {
-    local path="$1"
+    local dir_path="$1"
     local user="$2"
     
     mkdir -p "$AUTO_SWITCH_CACHE_DIR" 2>/dev/null || return 0
     
     local cache_file
-    cache_file=$(auto_switch_cache_file "$path")
+    cache_file=$(auto_switch_cache_file "$dir_path")
     echo "$user" > "$cache_file" 2>/dev/null || true
 }
 
@@ -2303,9 +2317,9 @@ auto_switch_status() {
             local project_count=0
             while IFS= read -r line || [[ -n "$line" ]]; do
                 if [[ "$line" == *"|"* ]]; then
-                    ((path_count++))
+                    path_count=$((path_count + 1))
                 else
-                    ((project_count++))
+                    project_count=$((project_count + 1))
                 fi
             done < "$GH_PROJECT_CONFIG"
             
@@ -2680,7 +2694,7 @@ cmd_status() {
     local user_count=0
     while IFS= read -r username; do
         if [[ -n "$username" ]]; then
-            ((user_count++))
+            user_count=$((user_count + 1))
             local flags=""
             
             # Check if this user is active (git config matches)
@@ -2706,7 +2720,7 @@ cmd_status() {
             fi
             
             printf "  %d. %-20s%s\n" "$i" "$username" "$flags"
-            ((i++))
+            i=$((i + 1))
         fi
     done < "$GH_USERS_CONFIG"
     
@@ -2729,7 +2743,7 @@ cmd_status() {
                         break
                     fi
                 fi
-                ((j++))
+                j=$((j + 1))
             fi
         done < "$GH_USERS_CONFIG"
         
@@ -2758,6 +2772,49 @@ cmd_status() {
     echo "Type 'ghs help' for all commands"
     
     return 0
+}
+
+# Doctor command - diagnostics for troubleshooting
+cmd_doctor() {
+    echo "🏥 gh-switcher diagnostics"
+    echo "Shell: ${SHELL##*/} ${ZSH_VERSION:+v$ZSH_VERSION}${BASH_VERSION:+v$BASH_VERSION}"
+    echo ""
+    
+    # Test critical commands
+    echo "Critical commands:"
+    for cmd in grep sed mktemp mv cp rm; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            echo "  ✅ $cmd: $(command -v "$cmd")"
+        else
+            echo "  ❌ $cmd: not found"
+        fi
+    done
+    
+    # Test for zsh path variable issue
+    if [[ -n "$ZSH_VERSION" ]]; then
+        echo ""
+        echo "Zsh PATH safety check:"
+        (
+            local dir_path="/tmp"
+            if command -v grep >/dev/null 2>&1; then
+                echo "  ✅ PATH survives 'local dir_path' assignment"
+            else
+                echo "  ❌ PATH corrupted by local variable assignment!"
+                echo "     This should be fixed in gh-switcher"
+            fi
+        )
+    fi
+    
+    # Check configuration files
+    echo ""
+    echo "Configuration files:"
+    for file in "$GH_USERS_CONFIG" "$GH_USER_PROFILES" "$GH_PROJECT_CONFIG"; do
+        if [[ -f "$file" ]]; then
+            echo "  ✅ $file exists"
+        else
+            echo "  ⚠️  $file missing (will be created on first use)"
+        fi
+    done
 }
 
 # Test SSH authentication command
@@ -2947,6 +3004,7 @@ COMMANDS:
   edit <user>         Update email, SSH key, or host settings      [NEW]
   test-ssh [<user>]   Verify SSH key works with GitHub            [NEW]
   status              Show current account and project state (default)
+  doctor              Show diagnostics for troubleshooting
   guard               Prevent wrong-account commits (see 'ghs guard')
   auto-switch         Automatic profile switching by directory      [NEW]
   help                Show this help message
@@ -2999,6 +3057,7 @@ ghs() {
         test-ssh)         cmd_test_ssh "$@" ;;   # NEW
         auto-switch)      cmd_auto_switch "$@" ;; # NEW
         status)           cmd_status "$@" ;;
+        doctor)           cmd_doctor ;;
         guard)            cmd_guard "$@" ;;
         help|--help|-h)   cmd_help ;;
         *)                
@@ -3012,7 +3071,10 @@ ghs() {
 
 
 # Export main function
-export -f ghs
+# Export function for bash (zsh doesn't support export -f)
+if [[ -n "${BASH_VERSION:-}" ]]; then
+    export -f ghs
+fi
 
 # If script is executed directly, run with all arguments
 if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" ]]; then
