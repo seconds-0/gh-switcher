@@ -262,80 +262,13 @@ EOF
 # Guard Hook Tests
 # =============================================================================
 
-#@test "guard test shows host info for enterprise assignment" {
-#    # Create project assignment
-#    echo "testproject:enterprise" >> "$GH_PROJECT_CONFIG"
-#    
-#    # Create enterprise profile
-#    user_add "enterprise"
-#    profile_create "enterprise" "Enterprise" "enterprise@company.com" "" "github.enterprise.com"
-#    
-#    # Mock git for project detection
-#    cat > "$TEST_HOME/git" << 'EOF'
-##!/bin/bash
-#if [[ "$1" == "rev-parse" && "$2" == "--show-toplevel" ]]; then
-#    echo "/path/to/testproject"
-#    exit 0
-#fi
-## Pass through for config commands
-#/usr/bin/git "$@"
-#EOF
-#    chmod +x "$TEST_HOME/git"
-#    export PATH="$TEST_HOME:$PATH"
-#    
-#    # Mock gh to be authenticated
-#    cat > "$TEST_HOME/gh" << 'EOF'
-##!/bin/bash
-#if [[ "$1 $2 $3 $4" == "api user -q .login" ]]; then
-#    echo "enterprise"
-#    exit 0
-#fi
-#exit 1
-#EOF
-#    chmod +x "$TEST_HOME/gh"
-#    
-#    run guard_test
-#    assert_success
-#    assert_output_contains "Note: This profile is for host: github.enterprise.com"
-#    assert_output_contains "gh auth status --hostname github.enterprise.com"
-#}
-
-#@test "guard test shows correct auth command for enterprise" {
-#    # Create project assignment
-#    echo "testproject:enterprise" >> "$GH_PROJECT_CONFIG"
-#    
-#    # Create enterprise profile
-#    user_add "enterprise"
-#    profile_create "enterprise" "Enterprise" "enterprise@company.com" "" "github.enterprise.com"
-#    
-#    # Mock git and gh to simulate no auth
-#    cat > "$TEST_HOME/git" << 'EOF'
-##!/bin/bash
-#if [[ "$1" == "rev-parse" && "$2" == "--show-toplevel" ]]; then
-#    echo "/path/to/testproject"
-#    exit 0
-#fi
-#if [[ "$1" == "config" ]]; then
-#    if [[ "$2" == "user.name" ]]; then
-#        echo "Enterprise User"
-#        exit 0
-#    elif [[ "$2" == "user.email" ]]; then
-#        echo "enterprise@company.com"
-#        exit 0
-#    fi
-#fi
-#/usr/bin/git "$@"
-#EOF
-#    chmod +x "$TEST_HOME/git"
-#    export PATH="$TEST_HOME:$PATH"
-#    
-#    cat > "$TEST_HOME/gh" << 'EOF'
-##!/bin/bash
-#exit 1
-#EOF
-#    chmod +x "$TEST_HOME/gh"
-#    
-#    run guard_test
-#    assert_success
-#    assert_output_contains "gh auth login --hostname github.enterprise.com"
-#}
+# NOTE: Removed 2 commented tests that were causing BATS count mismatch (2024-01-14)
+# These tests verified guard functionality with enterprise hosts:
+# - "guard test shows host info for enterprise assignment" 
+# - "guard test shows correct auth command for enterprise"
+# 
+# This functionality is covered in tests/integration/test_multihost_workflow.bats
+# See Documentation/INVESTIGATE-TEST-NUMBERING-ISSUE.md for details
+# 
+# TODO: After fixing BATS numbering issue, consider re-adding these tests if they
+#       provide value beyond the integration test coverage
