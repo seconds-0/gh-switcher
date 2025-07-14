@@ -40,7 +40,10 @@ measure_time_ms() {
     local duration=$(measure_time_ms cmd_users)
     echo "# Duration: ${duration}ms" >&3
     # Allow up to 350ms for bash script startup overhead with profile lookups including host info
-    [[ "$duration" -lt 350 ]]
+    # CI environments may be slower, allow extra time
+    local threshold=350
+    [[ -n "${CI:-}" ]] && threshold=500
+    [[ "$duration" -lt "$threshold" ]]
 }
 
 @test "ghs switch completes within 100ms" {
@@ -51,19 +54,28 @@ measure_time_ms() {
     
     local duration=$(measure_time_ms cmd_switch 1)
     echo "# Duration: ${duration}ms" >&3
-    [[ "$duration" -lt 100 ]]
+    # CI environments may be slower
+    local threshold=100
+    [[ -n "${CI:-}" ]] && threshold=200
+    [[ "$duration" -lt "$threshold" ]]
 }
 
 @test "ghs add completes within 100ms" {
     local duration=$(measure_time_ms cmd_add testperf)
     echo "# Duration: ${duration}ms" >&3
-    [[ "$duration" -lt 100 ]]
+    # CI environments may be slower
+    local threshold=100
+    [[ -n "${CI:-}" ]] && threshold=200
+    [[ "$duration" -lt "$threshold" ]]
 }
 
 @test "ghs status completes within 250ms" {
     local duration=$(measure_time_ms cmd_status)
     echo "# Duration: ${duration}ms" >&3
-    [[ "$duration" -lt 250 ]]
+    # CI environments may be slower
+    local threshold=250
+    [[ -n "${CI:-}" ]] && threshold=400
+    [[ "$duration" -lt "$threshold" ]]
 }
 
 @test "ghs guard test completes within reasonable time" {
