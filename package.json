@@ -17,7 +17,8 @@
     "install-hook": "bash gh-switcher.sh guard install",
     "uninstall-hook": "bash gh-switcher.sh guard uninstall",
     "install-dev-hooks": "./scripts/install-dev-hooks.sh",
-    "precommit": "npm run lint && npm test"
+    "precommit": "npm run lint && npm test",
+    "shell-reset": "./scripts/shell-reset.sh"
   },
   "keywords": [
     "github",
