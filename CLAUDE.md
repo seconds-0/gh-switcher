@@ -104,6 +104,7 @@ Ask yourself:
 
 ### Testing and Debugging Philosophy
 - **BATS Syntax errors are normal debugging, not project blockers. Fix the syntax, don't abandon the approach. Look up documentation with web search if stuck**
+- **BATS test numbering gaps**: When tests fail to execute (0 of N), check for missing helper loads first before changing test logic
 
 ### Implementation Verification
 - Always check the implementation versus the plan. If it doesnt match the plan, it is wrong. If the plan needs to change, ask the users permission.
