@@ -122,13 +122,30 @@ teardown() {
     # Test bash startup time
     local output
     output=$(assert_shell_command_succeeds "bash" "
-        start_time=\$(date +%s%N 2>/dev/null || python3 -c 'import time; print(int(time.time() * 1000000000))')
+        # Get start time in milliseconds (portable across macOS and Linux)
+        if command -v python3 >/dev/null 2>&1; then
+            start_time=\$(python3 -c 'import time; print(int(time.time() * 1000))')
+        elif command -v perl >/dev/null 2>&1; then
+            start_time=\$(perl -MTime::HiRes=time -e 'print int(time * 1000)')
+        else
+            # Fallback to seconds precision
+            start_time=\$(date +%s)000
+        fi
+        
         source '$script_path'
-        end_time=\$(date +%s%N 2>/dev/null || python3 -c 'import time; print(int(time.time() * 1000000000))')
+        
+        # Get end time in milliseconds
+        if command -v python3 >/dev/null 2>&1; then
+            end_time=\$(python3 -c 'import time; print(int(time.time() * 1000))')
+        elif command -v perl >/dev/null 2>&1; then
+            end_time=\$(perl -MTime::HiRes=time -e 'print int(time * 1000)')
+        else
+            # Fallback to seconds precision
+            end_time=\$(date +%s)000
+        fi
         
         # Calculate duration in milliseconds
-        duration_ns=\$((end_time - start_time))
-        duration_ms=\$((duration_ns / 1000000))
+        duration_ms=\$((end_time - start_time))
         
         echo \"Duration: \${duration_ms}ms\"
         
