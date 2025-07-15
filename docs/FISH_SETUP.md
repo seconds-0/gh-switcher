@@ -4,17 +4,40 @@ Since Fish shell has a different syntax than Bash/Zsh, gh-switcher requires a wr
 
 ## Quick Setup
 
-1. Create the wrapper function:
+### 1. Find your gh-switcher.sh path
+
+Depending on how you installed gh-switcher:
+
 ```fish
-mkdir -p ~/.config/fish/functions
-echo 'function ghs
-    bash -c "source /path/to/gh-switcher.sh && ghs $argv"
-end' > ~/.config/fish/functions/ghs.fish
+# If installed with npm globally:
+set GHS_PATH (npm root -g)/gh-switcher/gh-switcher.sh
+
+# If installed with Homebrew:
+set GHS_PATH (brew --prefix)/bin/gh-switcher.sh
+
+# If cloned from GitHub:
+set GHS_PATH ~/path/to/gh-switcher/gh-switcher.sh
+
+# Verify the file exists:
+ls -la $GHS_PATH
 ```
 
-2. Replace `/path/to/gh-switcher.sh` with the actual path to your gh-switcher installation.
+### 2. Create the wrapper function
 
-3. The function will be automatically available in all new Fish sessions.
+```fish
+mkdir -p ~/.config/fish/functions
+echo "function ghs
+    bash -c \"source '$GHS_PATH' && ghs \\\$argv\"
+end" > ~/.config/fish/functions/ghs.fish
+```
+
+### 3. Test it works
+
+The function will be automatically available in all new Fish sessions. Test it:
+
+```fish
+ghs --help
+```
 
 ## Optional: Tab Completions
 
@@ -54,9 +77,41 @@ ghs switch myuser
 - Shell startup time is slightly increased due to the wrapper
 - Some error messages may reference Bash syntax
 
+## Updating gh-switcher
+
+When you update gh-switcher (via npm, brew, or git pull), the wrapper function automatically uses the new version. No changes needed!
+
+If you move gh-switcher to a different location:
+1. Find the new path (see step 1 above)
+2. Update the wrapper function by running the setup again
+3. Or manually edit: `~/.config/fish/functions/ghs.fish`
+
+## Better Error Handling (Optional)
+
+For more helpful error messages when the path is wrong, use this enhanced wrapper:
+
+```fish
+function ghs
+    set script_path "/path/to/gh-switcher.sh"  # Update this path
+    
+    if not test -f "$script_path"
+        echo "Error: gh-switcher.sh not found at $script_path" >&2
+        echo "Please update ~/.config/fish/functions/ghs.fish with the correct path" >&2
+        return 1
+    end
+    
+    bash -c "source '$script_path' && ghs $argv"
+end
+```
+
 ## Troubleshooting
 
 If `ghs` command is not found:
 1. Check that the function file exists: `ls ~/.config/fish/functions/ghs.fish`
 2. Verify the path in the function is correct
 3. Start a new Fish session or run: `source ~/.config/fish/functions/ghs.fish`
+
+If you get "gh-switcher.sh not found" errors:
+1. Verify gh-switcher is installed: `find ~ -name "gh-switcher.sh" 2>/dev/null`
+2. Update the path in `~/.config/fish/functions/ghs.fish`
+3. Make sure the file is executable: `chmod +x /path/to/gh-switcher.sh`

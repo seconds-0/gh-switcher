@@ -15,15 +15,21 @@ setup() {
     create_mock_gh
     create_test_ssh_keys
     
-    # Store original Fish config path
-    export FISH_CONFIG_DIR="${HOME}/.config/fish"
+    # Create isolated test environment for Fish config
+    export TEST_FISH_DIR="$(mktemp -d)"
+    export XDG_CONFIG_HOME="${TEST_FISH_DIR}/.config"
+    export FISH_CONFIG_DIR="${XDG_CONFIG_HOME}/fish"
     export FISH_FUNCTIONS_DIR="${FISH_CONFIG_DIR}/functions"
+    
+    # Create the directory structure
+    mkdir -p "${FISH_FUNCTIONS_DIR}"
+    mkdir -p "${FISH_CONFIG_DIR}/completions"
 }
 
 teardown() {
     cleanup_e2e_test_env
-    # Clean up Fish functions if they exist
-    rm -f "${FISH_FUNCTIONS_DIR}/ghs.fish"
+    # Clean up test Fish directory
+    [[ -d "${TEST_FISH_DIR}" ]] && rm -rf "${TEST_FISH_DIR}"
 }
 
 # Test 1: Fish users can install and use the wrapper function
@@ -41,18 +47,18 @@ end
 EOF
     
     # Test 1: Function loads in new Fish session
-    run fish -c "functions -q ghs && echo 'Function exists'"
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "functions -q ghs && echo 'Function exists'"
     assert_success
     assert_output_contains "Function exists"
     
     # Test 2: Function actually works
-    run fish -c "ghs status"
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "ghs status"
     assert_success
     # Should show status output (not an error)
     assert_output_contains "Current GitHub user:" || assert_output_contains "No current user"
     
     # Test 3: Function handles arguments correctly
-    run fish -c "ghs --help"
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "ghs --help"
     assert_success
     assert_output_contains "Usage:"
 }
@@ -72,7 +78,7 @@ end
 EOF
     
     # Test with Fish-specific environment
-    run fish -c "
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
         # Set Fish-specific variables that might cause issues
         set -x FISH_VERSION \$FISH_VERSION
         set -x fish_greeting ''
@@ -107,7 +113,7 @@ end
 EOF
     
     # Test various Fish-specific syntax that might cause issues
-    run fish -c "
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
         # Test 1: Spaces in arguments
         ghs add 'user with spaces' 2>&1 | string match -r 'Invalid username format'
         
@@ -153,7 +159,7 @@ EOF
     test_repo=$(mktemp -d)
     
     # Run complete workflow in Fish
-    run fish -c "
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
         cd '$test_repo'
         git init >/dev/null 2>&1
         
@@ -233,7 +239,7 @@ complete -c ghs -n "__fish_use_subcommand" -a "guard" -d "Manage guard hooks"
 EOF
     
     # Test completions work
-    run fish -c "
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
         # Load completions
         source '${FISH_CONFIG_DIR}/completions/ghs.fish'
         
@@ -253,4 +259,165 @@ EOF
     
     # Clean up
     rm -f "${FISH_CONFIG_DIR}/completions/ghs.fish"
+}
+
+# Test 6: Exit code propagation
+@test "e2e: fish - wrapper propagates exit codes correctly" {
+    command -v fish >/dev/null 2>&1 || skip "Fish not installed"
+    
+    local script_path="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/gh-switcher.sh"
+    
+    # Create wrapper function
+    cat > "${FISH_FUNCTIONS_DIR}/ghs.fish" << EOF
+function ghs
+    bash -c "source '$script_path' && ghs \$argv"
+end
+EOF
+    
+    # Test 1: Successful command returns 0
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
+        ghs status >/dev/null 2>&1
+        echo \"Exit code: \$status\"
+    "
+    assert_success
+    assert_output_contains "Exit code: 0"
+    
+    # Test 2: Failed command returns non-zero
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
+        ghs switch nonexistent >/dev/null 2>&1
+        echo \"Exit code: \$status\"
+    "
+    assert_success
+    assert_output_contains "Exit code: 1"
+    
+    # Test 3: Invalid command returns proper error code
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
+        ghs invalidcommand >/dev/null 2>&1
+        echo \"Exit code: \$status\"
+    "
+    assert_success
+    assert_output_contains "Exit code: 1"
+}
+
+# Test 7: Special characters in arguments
+@test "e2e: fish - handles special characters in arguments" {
+    command -v fish >/dev/null 2>&1 || skip "Fish not installed"
+    
+    local script_path="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/gh-switcher.sh"
+    
+    # Create wrapper function
+    cat > "${FISH_FUNCTIONS_DIR}/ghs.fish" << EOF
+function ghs
+    bash -c "source '$script_path' && ghs \$argv"
+end
+EOF
+    
+    # Test 1: Spaces in arguments
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
+        ghs add testfish >/dev/null 2>&1
+        ghs edit testfish --name 'First Last' >/dev/null 2>&1
+        ghs show testfish 2>&1 | grep -q 'First Last'
+        if test \$status -eq 0
+            echo 'SUCCESS: Spaces handled correctly'
+        else
+            echo 'ERROR: Spaces not handled'
+            exit 1
+        end
+    "
+    assert_success
+    assert_output_contains "SUCCESS: Spaces handled correctly"
+    
+    # Test 2: Single quotes in arguments
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
+        ghs edit testfish --name \"O'Brien\" >/dev/null 2>&1
+        ghs show testfish 2>&1 | grep -q \"O'Brien\"
+        if test \$status -eq 0
+            echo 'SUCCESS: Single quotes handled correctly'
+        else
+            echo 'ERROR: Single quotes not handled'
+            exit 1
+        end
+    "
+    assert_success
+    assert_output_contains "SUCCESS: Single quotes handled correctly"
+    
+    # Test 3: Dollar signs don't expand
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
+        set testvar 'SHOULD_NOT_APPEAR'
+        # Try to add user with dollar sign (should fail as invalid username)
+        ghs add 'user\$testvar' 2>&1 | grep -q 'Invalid username format'
+        if test \$status -eq 0
+            echo 'SUCCESS: Dollar signs not expanded'
+        else
+            echo 'ERROR: Dollar signs were expanded'
+            exit 1
+        end
+    "
+    assert_success
+    assert_output_contains "SUCCESS: Dollar signs not expanded"
+    
+    # Clean up
+    run bash -c "source '$script_path' && ghs remove testfish 2>/dev/null || true"
+}
+
+# Test 8: Missing script error handling
+@test "e2e: fish - shows helpful error when script path is wrong" {
+    command -v fish >/dev/null 2>&1 || skip "Fish not installed"
+    
+    # Create wrapper with non-existent script path
+    cat > "${FISH_FUNCTIONS_DIR}/ghs.fish" << 'EOF'
+function ghs
+    bash -c "source '/nonexistent/path/gh-switcher.sh' && ghs $argv" 2>&1
+    set exit_code $status
+    if test $exit_code -ne 0
+        echo "Error: Could not find gh-switcher.sh at /nonexistent/path/gh-switcher.sh" >&2
+        echo "Please update ~/.config/fish/functions/ghs.fish with the correct path" >&2
+        return $exit_code
+    end
+end
+EOF
+    
+    # Test that error message is helpful
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "ghs status"
+    assert_failure
+    assert_output_contains "Could not find gh-switcher.sh"
+    assert_output_contains "Please update"
+    assert_output_contains "ghs.fish with the correct path"
+}
+
+# Test 9: Documented setup process works
+@test "e2e: fish - documented setup instructions work correctly" {
+    command -v fish >/dev/null 2>&1 || skip "Fish not installed"
+    
+    local script_path="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/gh-switcher.sh"
+    
+    # Follow the documented setup process exactly
+    run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
+        # Step 1: Find gh-switcher path (simulating user finding it)
+        set GHS_PATH '$script_path'
+        
+        # Step 2: Verify file exists
+        if not test -f \"\$GHS_PATH\"
+            echo 'ERROR: gh-switcher.sh not found'
+            exit 1
+        end
+        
+        # Step 3: Create wrapper function (as documented)
+        mkdir -p ~/.config/fish/functions
+        echo \"function ghs
+    bash -c \\\"source '\$GHS_PATH' && ghs \\\\\\\$argv\\\"
+end\" > ~/.config/fish/functions/ghs.fish
+        
+        # Step 4: Test it works
+        ghs --help >/dev/null 2>&1
+        if test \$status -eq 0
+            echo 'SUCCESS: Documented setup works'
+        else
+            echo 'ERROR: Setup failed'
+            exit 1
+        end
+    "
+    
+    assert_success
+    assert_output_contains "SUCCESS: Documented setup works"
 }
