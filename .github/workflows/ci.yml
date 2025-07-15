@@ -32,7 +32,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y shellcheck zsh fish
+          sudo apt-get install -y shellcheck zsh fish dash
           # Install bats-core from official Ubuntu repos (available in 22.04+)
           sudo apt-get install -y bats || {
             # Fallback: install from GitHub releases
@@ -46,6 +46,7 @@ jobs:
         run: |
           brew update
           brew install shellcheck bats-core fish
+          # Dash is not in Homebrew core, but we can test with /bin/sh which is similar
           # zsh is pre-installed on macOS but ensure it's available
           which zsh || brew install zsh
 
