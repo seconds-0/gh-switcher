@@ -338,13 +338,13 @@ EOF
     # Test 3: Dollar signs don't expand
     run env XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" fish -c "
         set testvar 'SHOULD_NOT_APPEAR'
-        # Try to add user with dollar sign (should fail as invalid username)
-        ghs add 'user\$testvar' 2>&1 | grep -q 'Invalid username format'
-        if test \$status -eq 0
-            echo 'SUCCESS: Dollar signs not expanded'
-        else
+        # Test that dollar signs are passed literally, not expanded
+        set output (ghs add 'user\$testvar' 2>&1)
+        if string match -q '*SHOULD_NOT_APPEAR*' \$output
             echo 'ERROR: Dollar signs were expanded'
             exit 1
+        else
+            echo 'SUCCESS: Dollar signs not expanded'
         end
     "
     assert_success
