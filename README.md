@@ -25,7 +25,7 @@ chmod +x gh-switcher.sh
 ./gh-switcher.sh install
 ```
 
-For **Fish** users: See [Fish Setup Guide](docs/FISH_SETUP.md) for special instructions.
+For **Fish** users: Run `ghs fish-setup` after installation, or see [Fish Setup Guide](docs/FISH_SETUP.md).
 
 ### Manual Install
 
