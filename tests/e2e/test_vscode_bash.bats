@@ -55,7 +55,7 @@ teardown() {
         
         # Add user
         if ! ghs add vscodeuser >/dev/null 2>&1; then
-            echo 'Failed to add user' >&2
+            echo 'ERROR: Failed to add user vscodeuser' >&2
             exit 1
         fi
         
@@ -64,14 +64,14 @@ teardown() {
         
         # Switch to user
         if ! ghs switch vscodeuser >/dev/null 2>&1; then
-            echo 'Failed to switch user' >&2
+            echo 'ERROR: Failed to switch to user vscodeuser' >&2
             exit 1
         fi
         
         # Verify switch worked - capture status to avoid broken pipe
         status_output=\$(ghs status 2>&1)
         if ! echo \"\$status_output\" | grep -q vscodeuser; then
-            echo 'Status does not show vscodeuser' >&2
+            echo 'ERROR: Status does not show vscodeuser' >&2
             echo \"Status output was: \$status_output\" >&2
             exit 1
         fi
@@ -162,13 +162,13 @@ teardown() {
         
         # Install guard hooks
         if ! ghs guard install >/dev/null 2>&1; then
-            echo 'Failed to install guard hooks' >&2
+            echo 'ERROR: Failed to install guard hooks' >&2
             exit 1
         fi
         
         # Verify hook exists
         if [[ ! -f .git/hooks/pre-commit ]]; then
-            echo 'Pre-commit hook not created' >&2
+            echo 'ERROR: Pre-commit hook not created at .git/hooks/pre-commit' >&2
             exit 1
         fi
         
@@ -178,13 +178,13 @@ teardown() {
         
         # Verify hook contains GHS_GUARD_HOOK marker
         if ! grep -q 'GHS_GUARD_HOOK' .git/hooks/pre-commit; then
-            echo 'Pre-commit hook does not contain GHS_GUARD_HOOK marker' >&2
+            echo 'ERROR: Pre-commit hook does not contain GHS_GUARD_HOOK marker' >&2
             exit 1
         fi
         
         # Verify it checks for account mismatch
         if ! grep -q 'Account mismatch detected' .git/hooks/pre-commit; then
-            echo 'Pre-commit hook does not contain account mismatch check' >&2
+            echo 'ERROR: Pre-commit hook does not contain account mismatch check' >&2
             exit 1
         fi
         
