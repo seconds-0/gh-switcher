@@ -15,6 +15,7 @@ Lightweight, secure GitHub account switcher for the command line. Manage multipl
 
 ### Quick Install
 
+For **Bash/Zsh** users:
 ```bash
 # Download and make executable
 curl -o gh-switcher.sh https://raw.githubusercontent.com/user/repo/main/gh-switcher.sh
@@ -24,13 +25,18 @@ chmod +x gh-switcher.sh
 ./gh-switcher.sh install
 ```
 
+For **Fish** users: Run `ghs fish-setup` after installation, or see [Fish Setup Guide](docs/FISH_SETUP.md).
+
 ### Manual Install
 
+**Bash/Zsh:**
 ```bash
 # Add to your shell profile
 echo "source $(pwd)/gh-switcher.sh" >> ~/.zshrc
 source ~/.zshrc
 ```
+
+**Fish:** Requires a wrapper function - see [Fish Setup Guide](docs/FISH_SETUP.md).
 
 ## Quick Start
 
@@ -118,7 +124,12 @@ ghs update bob gpg "XYZ789GHI"
 
 - [GitHub CLI](https://cli.github.com/) (`gh`) - for authentication
 - Git - for repository operations
-- Bash/Zsh shell
+- Supported shells:
+  - **Bash** (4.0+) - Full support
+  - **Zsh** - Full support
+  - **Fish** - Via wrapper function ([setup guide](docs/FISH_SETUP.md))
+  - **Dash/POSIX sh** - Basic compatibility
+  - Works in **VS Code integrated terminal**
 
 ## Development Setup (Contributors)
 

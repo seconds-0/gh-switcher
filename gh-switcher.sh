@@ -3007,6 +3007,7 @@ COMMANDS:
   doctor              Show diagnostics for troubleshooting
   guard               Prevent wrong-account commits (see 'ghs guard')
   auto-switch         Automatic profile switching by directory      [NEW]
+  fish-setup          Set up gh-switcher for Fish shell            [NEW]
   help                Show this help message
 
 OPTIONS:
@@ -3029,6 +3030,48 @@ AUTO-SWITCHING:
   ghs auto-switch status     Check configuration and assigned directories
 EOF
     return 0
+}
+
+# Fish shell setup command
+cmd_fish_setup() {
+    echo "🐟 Setting up gh-switcher for Fish shell..."
+    echo
+    
+    # Get the actual path to this script
+    local script_path
+    script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+    
+    # Check if Fish is installed
+    if ! command -v fish >/dev/null 2>&1; then
+        echo "❌ Fish shell is not installed"
+        echo "   Install Fish first: https://fishshell.com"
+        return 1
+    fi
+    
+    # Create the Fish function
+    local fish_functions_dir="$HOME/.config/fish/functions"
+    mkdir -p "$fish_functions_dir"
+    
+    cat > "$fish_functions_dir/ghs.fish" << EOF
+function ghs
+    set -l script_path '$script_path'
+    if not test -f "\$script_path"
+        echo "Error: gh-switcher.sh not found at \$script_path" >&2
+        echo "Please run 'ghs fish-setup' again to update the path" >&2
+        return 1
+    end
+    bash -c "source '\$script_path' && ghs \\\$argv"
+end
+EOF
+    
+    echo "✅ Fish function created at: $fish_functions_dir/ghs.fish"
+    echo "   Using gh-switcher at: $script_path"
+    echo
+    echo "📋 Next steps:"
+    echo "   1. Start a new Fish session or run: source $fish_functions_dir/ghs.fish"
+    echo "   2. Test with: ghs --help"
+    echo
+    echo "For tab completions and more info, see: docs/FISH_SETUP.md"
 }
 
 # =============================================================================
@@ -3069,6 +3112,7 @@ ghs() {
         status)           cmd_status "$@" ;;
         doctor)           cmd_doctor ;;
         guard)            cmd_guard "$@" ;;
+        fish-setup)       cmd_fish_setup ;;      # NEW - Fish shell setup
         help|--help|-h)   cmd_help ;;
         *)                
             echo "❌ Unknown command: $cmd"
