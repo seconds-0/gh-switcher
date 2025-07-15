@@ -30,8 +30,12 @@ teardown() {
     run dash -c ". '$script_path' 2>&1"
     
     assert_failure
-    # Verify it fails due to bash-specific syntax
-    assert_output_contains "[[: not found"
+    # Verify it fails due to bash-specific syntax (various possible error messages)
+    # Different dash versions may report errors differently
+    if ! echo "$output" | grep -qE "(\[\[: not found|Syntax error|unexpected|Bad substitution)"; then
+        echo "ERROR: Expected bashism error, got: $output" >&2
+        return 1
+    fi
 }
 
 # Test 2: gh-switcher can be invoked via bash from dash
