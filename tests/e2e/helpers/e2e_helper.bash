@@ -20,8 +20,8 @@ setup_e2e_test_env() {
     
     # Override config paths to use test environment
     export GH_USERS_CONFIG="$HOME/.config/gh-switcher/users"
-    export GH_USER_PROFILES="$HOME/.config/gh-switcher/profiles"
-    export GH_PROJECT_CONFIG="$HOME/.config/gh-switcher/projects"
+    export GH_USER_PROFILES="$HOME/.gh-user-profiles"
+    export GH_PROJECT_CONFIG="$HOME/.gh-project-accounts"
     
     # Add test bin to PATH for mocks
     export PATH="$HOME/bin:$PATH"
@@ -53,13 +53,16 @@ create_mock_gh() {
 
 case "$*" in
     "auth status")
-        echo "github.com - Logged in as testuser1"
+        echo "github.com - Logged in as testuser"
         ;;
     "auth status --show-token")
-        echo "Logged in to github.com as testuser1 (oauth_token: gho_XXXXXXXX)"
+        echo "Logged in to github.com as testuser (oauth_token: gho_XXXXXXXX)"
         ;;
     "api user -q .login")
-        echo "${MOCK_GH_USER:-testuser1}"
+        echo "${MOCK_GH_USER:-testuser}"
+        ;;
+    "api user")
+        echo '{"login":"testuser","email":"testuser@example.com","name":"Test User"}'
         ;;
     "auth switch --user testuser1")
         export MOCK_GH_USER=testuser1
@@ -128,4 +131,21 @@ create_test_ssh_keys() {
     # Create fake public keys
     echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... testuser1@example.com" > "$HOME/.ssh/testuser1_ed25519.pub"
     echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... testuser2@example.com" > "$HOME/.ssh/testuser2_ed25519.pub"
+    
+    # Create mock SSH for testing
+    cat > "$HOME/bin/ssh" << 'EOF'
+#!/bin/bash
+# Mock SSH for E2E testing
+
+# Check if it's a GitHub SSH test
+if [[ "$*" == *"git@github"* ]] && [[ "$*" == *"git-receive-pack"* ]]; then
+    # Simulate successful SSH auth
+    echo "Hi testuser! You've successfully authenticated, but GitHub does not provide shell access."
+    exit 0
+fi
+
+# For other commands, just exit successfully
+exit 0
+EOF
+    chmod +x "$HOME/bin/ssh"
 }
