@@ -242,3 +242,13 @@ debug_test_state() {
     
     echo "========================"
 }
+
+# Get platform-aware timeout in milliseconds
+get_timeout_ms() {
+    local base_timeout=$1
+    if [[ "$OSTYPE" == "msys" ]]; then
+        echo $((base_timeout * 2))
+    else
+        echo $base_timeout
+    fi
+}

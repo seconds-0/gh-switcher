@@ -14,11 +14,20 @@ teardown() {
 measure_time_ms() {
     local start_ns=$(date +%s%N 2>/dev/null || echo "0")
     if [[ "$start_ns" == "0" ]]; then
-        # macOS doesn't support nanoseconds, use python
-        local start_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
-        "$@" >/dev/null 2>&1
-        local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
-        echo $((end_ms - start_ms))
+        # macOS/Windows don't support nanoseconds
+        # Use perl if available, otherwise fall back to seconds
+        if command -v perl >/dev/null 2>&1; then
+            local start_ms=$(perl -MTime::HiRes=time -e 'print int(time * 1000)')
+            "$@" >/dev/null 2>&1
+            local end_ms=$(perl -MTime::HiRes=time -e 'print int(time * 1000)')
+            echo $((end_ms - start_ms))
+        else
+            # Fallback to seconds precision
+            local start_s=$(date +%s)
+            "$@" >/dev/null 2>&1
+            local end_s=$(date +%s)
+            echo $(( (end_s - start_s) * 1000 ))
+        fi
     else
         # Linux supports nanoseconds
         "$@" >/dev/null 2>&1
@@ -41,7 +50,11 @@ measure_time_ms() {
     assert_output_contains "Email: alice@example.com"
     assert_output_contains "Name: Alice Smith"
     # SSH path should show with proper permissions icon
-    assert_output_contains ".ssh/alice_key ✅"
+    if [[ "$OSTYPE" == "msys" ]]; then
+        assert_output_contains ".ssh/alice_key [OK]"
+    else
+        assert_output_contains ".ssh/alice_key ✅"
+    fi
 }
 
 @test "ghs show works with user ID" {
@@ -237,7 +250,8 @@ measure_time_ms() {
     local duration=$(measure_time_ms ghs show perfuser)
     echo "# Duration: ${duration}ms" >&3
     # Allow up to 300ms for bash script startup overhead in CI environments
-    [[ "$duration" -lt 300 ]]
+    local timeout=$(get_timeout_ms 300)
+    [[ "$duration" -lt "$timeout" ]]
 }
 
 @test "ghs edit completes within reasonable time" {
@@ -247,7 +261,8 @@ measure_time_ms() {
     local duration=$(measure_time_ms ghs edit perfuser --name "New Name")
     echo "# Duration: ${duration}ms" >&3
     # Allow up to 350ms for bash script startup overhead and file operations in CI
-    [[ "$duration" -lt 350 ]]
+    local timeout=$(get_timeout_ms 350)
+    [[ "$duration" -lt "$timeout" ]]
 }
 
 # Tests for refactored functions

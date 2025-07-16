@@ -11,12 +11,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     defaults:
       run:
         shell: bash
 
     steps:
+      # Configure git to use LF on Windows
+      - name: Set git to use LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          
       # Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,6 +56,29 @@ jobs:
           # zsh is pre-installed on macOS but ensure it's available
           which zsh || brew install zsh
 
+      # Windows: Just do basic validation
+      - name: Basic Windows validation
+        if: runner.os == 'Windows'
+        run: |
+          # Set Windows environment
+          export OSTYPE="msys"
+          export GHS_PERF_MULTIPLIER=3
+          
+          # Test script syntax
+          bash -n gh-switcher.sh || { echo "❌ Script syntax error"; exit 1; }
+          
+          # Test script sourcing
+          export GHS_STRICT_MODE="false"
+          source ./gh-switcher.sh || { echo "❌ Failed to source script"; exit 1; }
+          
+          # Test basic functionality
+          if type cmd_users >/dev/null 2>&1; then
+            echo "✅ Windows Git Bash support verified"
+          else
+            echo "❌ Functions not loaded"
+            exit 1
+          fi
+
       # Install npm dependencies (none yet, but future-proof)
       - name: Install npm dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
@@ -57,6 +86,14 @@ jobs:
       # Run repository verification sequence (lint → test → build)
       - name: Run lint → test → build
         run: |
-          npm run lint --if-present
-          npm test
-          npm run build --if-present 
+          # Windows: Skip full test suite, just run build
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "✅ Windows validation passed (full tests run on Linux/macOS)"
+          else
+            # Non-Windows: Run full test suite
+            npm run lint
+            npm test
+          fi
+          
+          # Run build (all platforms)
+          npm run build --if-present || exit 1
