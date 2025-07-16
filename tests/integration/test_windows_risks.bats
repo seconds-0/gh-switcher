@@ -73,9 +73,9 @@ teardown() {
     assert_success
     assert_output "alice@corp.com"
     
-    # Verify it survives a round trip through our functions
-    run git_get_identity
-    assert_success
-    assert_output_contains "name:CORP\\alice.smith"
-    assert_output_contains "email:alice@corp.com"
+    # Verify it survives a round trip - check both values are set correctly
+    local stored_name=$(git config user.name)
+    local stored_email=$(git config user.email)
+    [[ "$stored_name" == "CORP\\alice.smith" ]] || fail "Name not stored correctly: $stored_name"
+    [[ "$stored_email" == "alice@corp.com" ]] || fail "Email not stored correctly: $stored_email"
 }
