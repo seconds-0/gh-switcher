@@ -59,15 +59,15 @@ jobs:
       - name: Install ShellCheck & BATS (Windows)
         if: runner.os == 'Windows'
         run: |
-          # ShellCheck for Windows
-          curl -L https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.zip -o shellcheck.zip
-          unzip -o shellcheck.zip
-          mv shellcheck.exe /usr/bin/shellcheck.exe
+          # ShellCheck for Windows with error handling
+          curl -L --fail https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.zip -o shellcheck.zip || exit 1
+          unzip -o shellcheck.zip || exit 1
+          mv shellcheck.exe /usr/bin/shellcheck.exe || exit 1
           
           # BATS for Windows (Git Bash has bash)
-          git clone --depth 1 https://github.com/bats-core/bats-core.git
-          cd bats-core
-          ./install.sh /usr/local
+          git clone --depth 1 https://github.com/bats-core/bats-core.git || exit 1
+          cd bats-core || exit 1
+          ./install.sh /usr/local || exit 1
           
           # Add to PATH for npm scripts
           echo "/usr/local/bin" >> $GITHUB_PATH

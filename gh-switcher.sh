@@ -289,7 +289,7 @@ validate_ssh_key() {
         # macOS stat returns octal permissions
         perms=$(stat -f "%Lp" "$key_path" 2>/dev/null)
     else
-        # Linux stat  
+        # Linux stat (also works for Git Bash which uses GNU coreutils)
         perms=$(stat -c "%a" "$key_path" 2>/dev/null)
     fi
     
