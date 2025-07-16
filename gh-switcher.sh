@@ -289,17 +289,30 @@ validate_ssh_key() {
     fi
     
     if [[ "$perms" != "600" ]]; then
-        if [[ "$fix_perms" == "true" ]]; then
-            echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
-            echo "   Set permissions to 600" >&2
-            if ! chmod 600 "$key_path"; then
-                echo "❌ Failed to fix SSH key permissions" >&2
+        # On Windows/Git Bash, permissions don't work the same way
+        if [[ "$OSTYPE" == "msys" ]]; then
+            if [[ "$fix_perms" == "true" ]]; then
+                # Try chmod anyway (sets read-only bit at least)
+                chmod 600 "$key_path" 2>/dev/null || true
+                echo "ℹ️  Note: SSH key permissions are limited on Windows NTFS" >&2
+                echo "   Git Bash SSH will work correctly despite this" >&2
+            fi
+            # Don't fail on Windows - Git Bash SSH doesn't check permissions
+            return 0
+        else
+            # On Unix systems, this is a real security issue
+            if [[ "$fix_perms" == "true" ]]; then
+                echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
+                echo "   Set permissions to 600" >&2
+                if ! chmod 600 "$key_path"; then
+                    echo "❌ Failed to fix SSH key permissions" >&2
+                    return 1
+                fi
+            else
+                echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
+                echo "   Set permissions to 600 with: chmod 600 $key_path" >&2
                 return 1
             fi
-        else
-            echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
-            echo "   Set permissions to 600 with: chmod 600 $key_path" >&2
-            return 1
         fi
     fi
     
@@ -1898,7 +1911,7 @@ cmd_show() {
             perms=$(stat -f %Lp "$ssh_key" 2>/dev/null || stat -c %a "$ssh_key" 2>/dev/null)
             # Ensure we only get numeric permissions (filter out any extra output)
             perms=$(echo "$perms" | grep -E '^[0-7]+$' | head -1)
-            if [[ "$perms" == "600" ]]; then
+            if [[ "$perms" == "600" ]] || [[ "$OSTYPE" == "msys" ]]; then
                 echo "   SSH: ${ssh_key/#$HOME/~} ✅"
             else
                 echo "   SSH: ${ssh_key/#$HOME/~} ⚠️"
