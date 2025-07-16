@@ -124,11 +124,12 @@ ghs update bob gpg "XYZ789GHI"
 
 - [GitHub CLI](https://cli.github.com/) (`gh`) - for authentication
 - Git - for repository operations
+- **Bash** (4.0+) - Required (gh-switcher uses bash-specific features)
 - Supported shells:
-  - **Bash** (4.0+) - Full support
-  - **Zsh** - Full support
+  - **Bash** - Full native support
+  - **Zsh** - Full native support  
   - **Fish** - Via wrapper function ([setup guide](docs/FISH_SETUP.md))
-  - **Dash/POSIX sh** - Basic compatibility
+  - **Dash/POSIX sh** - Not supported (invoke via bash)
   - Works in **VS Code integrated terminal**
 
 ## Development Setup (Contributors)
