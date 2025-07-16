@@ -65,11 +65,50 @@ jobs:
           # ShellCheck for Windows with proper extraction
           echo "Installing ShellCheck..."
           curl -L --fail https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.zip -o shellcheck.zip || exit 1
-          unzip -o shellcheck.zip || exit 1
           
-          # Find and move shellcheck.exe to PATH (handle subdirectory structure)
-          find . -name "shellcheck.exe" -type f -exec cp {} /usr/local/bin/shellcheck.exe \; || exit 1
+          # Create temporary extraction directory
+          mkdir -p shellcheck-extract || exit 1
+          cd shellcheck-extract || exit 1
+          
+          # Extract the zip file
+          unzip -o ../shellcheck.zip || exit 1
+          
+          # Debug: Show what was extracted
+          echo "Contents of shellcheck.zip:"
+          ls -la
+          find . -type f -name "*.exe" | head -10
+          
+          # Find shellcheck executable (might be shellcheck.exe, shellcheck-stable.exe, or in a subdirectory)
+          SHELLCHECK_EXE=""
+          for pattern in "shellcheck.exe" "shellcheck-*.exe" "*/shellcheck.exe" "*/shellcheck-*.exe"; do
+            FOUND=$(find . -name "$pattern" -type f 2>/dev/null | head -1)
+            if [[ -n "$FOUND" ]]; then
+              SHELLCHECK_EXE="$FOUND"
+              break
+            fi
+          done
+          
+          # If not found with patterns, just look for any .exe file
+          if [[ -z "$SHELLCHECK_EXE" ]]; then
+            SHELLCHECK_EXE=$(find . -name "*.exe" -type f | head -1)
+          fi
+          
+          if [[ -z "$SHELLCHECK_EXE" ]]; then
+            echo "ERROR: No executable found in shellcheck.zip"
+            echo "Directory contents:"
+            find . -type f | head -20
+            exit 1
+          fi
+          
+          echo "Found ShellCheck executable: $SHELLCHECK_EXE"
+          
+          # Copy to destination with standard name
+          cp "$SHELLCHECK_EXE" /usr/local/bin/shellcheck.exe || exit 1
           chmod +x /usr/local/bin/shellcheck.exe || exit 1
+          
+          # Clean up extraction directory
+          cd ..
+          rm -rf shellcheck-extract shellcheck.zip
           
           # Verify ShellCheck installation
           /usr/local/bin/shellcheck.exe --version || exit 1
@@ -91,6 +130,8 @@ jobs:
           ls -la /usr/local/bin/ || true
           which shellcheck || echo "shellcheck not in PATH"
           which bats || echo "bats not in PATH"
+          
+          echo "✅ Windows installation completed successfully"
 
       # Install npm dependencies (none yet, but future-proof)
       - name: Install npm dependencies
