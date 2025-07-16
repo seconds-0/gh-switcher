@@ -167,10 +167,27 @@ jobs:
           echo "Files in /usr/local/bin:"
           ls -la /usr/local/bin/ | head -20 || echo "Cannot list /usr/local/bin"
           
+          # Test basic command execution
+          echo ""
+          echo "Testing basic commands:"
+          echo "Testing echo: OK"
+          bash --version || echo "ERROR: bash not available"
+          
           # Run lint with explicit shellcheck path on Windows
           if [[ "${IS_WINDOWS}" == "true" ]]; then
+            echo ""
             echo "Running lint with Windows shellcheck..."
+            echo "Current directory: $(pwd)"
+            echo "Files in current directory:"
+            ls -la | head -10
+            
+            if [[ ! -f "gh-switcher.sh" ]]; then
+              echo "ERROR: gh-switcher.sh not found in current directory"
+              exit 1
+            fi
+            
             if [[ -f /usr/local/bin/shellcheck.exe ]]; then
+              echo "Running: /usr/local/bin/shellcheck.exe -x -e SC1091,SC2155,SC2181 gh-switcher.sh"
               /usr/local/bin/shellcheck.exe -x -e SC1091,SC2155,SC2181 gh-switcher.sh || exit 1
             else
               echo "ERROR: shellcheck.exe not found at /usr/local/bin/shellcheck.exe"
@@ -182,8 +199,16 @@ jobs:
           
           # Run tests - use bats directly on Windows
           if [[ "${IS_WINDOWS}" == "true" ]]; then
+            echo ""
             echo "Running tests with Windows bats..."
+            echo "Current directory: $(pwd)"
+            echo "Test directory contents:"
+            ls -la tests/ | head -10
+            
             if [[ -f /usr/local/bin/bats ]]; then
+              echo "Running: /usr/local/bin/bats -r tests"
+              echo "OSTYPE is: ${OSTYPE}"
+              echo "GHS_PERF_MULTIPLIER is: ${GHS_PERF_MULTIPLIER}"
               /usr/local/bin/bats -r tests || exit 1
             else
               echo "ERROR: bats not found at /usr/local/bin/bats"
