@@ -41,7 +41,11 @@ measure_time_ms() {
     assert_output_contains "Email: alice@example.com"
     assert_output_contains "Name: Alice Smith"
     # SSH path should show with proper permissions icon
-    assert_output_contains ".ssh/alice_key ✅"
+    if [[ "$OSTYPE" == "msys" ]]; then
+        assert_output_contains ".ssh/alice_key [OK]"
+    else
+        assert_output_contains ".ssh/alice_key ✅"
+    fi
 }
 
 @test "ghs show works with user ID" {
