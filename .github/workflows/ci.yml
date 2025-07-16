@@ -231,4 +231,4 @@ EOF
           fi
           
           # Run build (same for all platforms)
-          npm run build --if-present || exit 1 
+          npm run build --if-present || exit 1
