@@ -22,11 +22,30 @@ teardown() {
 measure_time_ms() {
     local start_ns=$(date +%s%N 2>/dev/null || echo "0")
     if [[ "$start_ns" == "0" ]]; then
-        # macOS doesn't support nanoseconds, use python
-        local start_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
-        "$@" >/dev/null 2>&1
-        local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
-        echo $((end_ms - start_ms))
+        # macOS/Windows don't support nanoseconds
+        # Try python3 first, then python, then perl as fallbacks
+        if command -v python3 >/dev/null 2>&1; then
+            local start_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+            "$@" >/dev/null 2>&1
+            local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+            echo $((end_ms - start_ms))
+        elif command -v python >/dev/null 2>&1; then
+            local start_ms=$(python -c 'import time; print(int(time.time() * 1000))')
+            "$@" >/dev/null 2>&1
+            local end_ms=$(python -c 'import time; print(int(time.time() * 1000))')
+            echo $((end_ms - start_ms))
+        elif command -v perl >/dev/null 2>&1; then
+            local start_ms=$(perl -MTime::HiRes=time -e 'print int(time * 1000)')
+            "$@" >/dev/null 2>&1
+            local end_ms=$(perl -MTime::HiRes=time -e 'print int(time * 1000)')
+            echo $((end_ms - start_ms))
+        else
+            # Fallback: just use seconds precision
+            local start_s=$(date +%s)
+            "$@" >/dev/null 2>&1
+            local end_s=$(date +%s)
+            echo $(( (end_s - start_s) * 1000 ))
+        fi
     else
         # Linux supports nanoseconds
         "$@" >/dev/null 2>&1
@@ -43,6 +62,8 @@ measure_time_ms() {
     # CI environments may be slower, allow extra time
     local threshold=350
     [[ -n "${CI:-}" ]] && threshold=500
+    # Windows is even slower due to POSIX emulation
+    [[ "$OSTYPE" == "msys" ]] && threshold=$((threshold * ${GHS_PERF_MULTIPLIER:-2}))
     [[ "$duration" -lt "$threshold" ]]
 }
 
@@ -57,6 +78,8 @@ measure_time_ms() {
     # CI environments may be slower
     local threshold=100
     [[ -n "${CI:-}" ]] && threshold=200
+    # Windows is even slower due to POSIX emulation
+    [[ "$OSTYPE" == "msys" ]] && threshold=$((threshold * ${GHS_PERF_MULTIPLIER:-2}))
     [[ "$duration" -lt "$threshold" ]]
 }
 
@@ -66,6 +89,8 @@ measure_time_ms() {
     # CI environments may be slower
     local threshold=100
     [[ -n "${CI:-}" ]] && threshold=200
+    # Windows is even slower due to POSIX emulation
+    [[ "$OSTYPE" == "msys" ]] && threshold=$((threshold * ${GHS_PERF_MULTIPLIER:-2}))
     [[ "$duration" -lt "$threshold" ]]
 }
 
@@ -75,6 +100,8 @@ measure_time_ms() {
     # CI environments may be slower
     local threshold=250
     [[ -n "${CI:-}" ]] && threshold=400
+    # Windows is even slower due to POSIX emulation
+    [[ "$OSTYPE" == "msys" ]] && threshold=$((threshold * ${GHS_PERF_MULTIPLIER:-2}))
     [[ "$duration" -lt "$threshold" ]]
 }
 
@@ -87,5 +114,8 @@ measure_time_ms() {
     local duration=$(measure_time_ms cmd_guard test)
     echo "# Duration: ${duration}ms" >&3
     # Allow up to 3000ms for guard test which makes GitHub API calls
-    [[ "$duration" -lt 3000 ]]
+    local threshold=3000
+    # Windows is even slower due to POSIX emulation
+    [[ "$OSTYPE" == "msys" ]] && threshold=$((threshold * ${GHS_PERF_MULTIPLIER:-2}))
+    [[ "$duration" -lt "$threshold" ]]
 }

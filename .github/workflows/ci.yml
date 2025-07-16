@@ -59,18 +59,38 @@ jobs:
       - name: Install ShellCheck & BATS (Windows)
         if: runner.os == 'Windows'
         run: |
-          # ShellCheck for Windows with error handling
+          # Create directories if they don't exist
+          mkdir -p /usr/local/bin || exit 1
+          
+          # ShellCheck for Windows with proper extraction
+          echo "Installing ShellCheck..."
           curl -L --fail https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.zip -o shellcheck.zip || exit 1
           unzip -o shellcheck.zip || exit 1
-          mv shellcheck.exe /usr/bin/shellcheck.exe || exit 1
+          
+          # Find and move shellcheck.exe to PATH (handle subdirectory structure)
+          find . -name "shellcheck.exe" -type f -exec cp {} /usr/local/bin/shellcheck.exe \; || exit 1
+          chmod +x /usr/local/bin/shellcheck.exe || exit 1
+          
+          # Verify ShellCheck installation
+          /usr/local/bin/shellcheck.exe --version || exit 1
           
           # BATS for Windows (Git Bash has bash)
+          echo "Installing BATS..."
           git clone --depth 1 https://github.com/bats-core/bats-core.git || exit 1
-          cd bats-core || exit 1
-          ./install.sh /usr/local || exit 1
+          (cd bats-core && ./install.sh /usr/local) || exit 1
+          
+          # Verify BATS installation
+          /usr/local/bin/bats --version || exit 1
           
           # Add to PATH for npm scripts
           echo "/usr/local/bin" >> $GITHUB_PATH
+          export PATH="/usr/local/bin:$PATH"
+          
+          # Debug: Show what's installed
+          echo "Installed tools:"
+          ls -la /usr/local/bin/ || true
+          which shellcheck || echo "shellcheck not in PATH"
+          which bats || echo "bats not in PATH"
 
       # Install npm dependencies (none yet, but future-proof)
       - name: Install npm dependencies
@@ -79,11 +99,29 @@ jobs:
       # Run repository verification sequence (lint → test → build)
       - name: Run lint → test → build
         run: |
-          npm run lint --if-present
-          # On Windows, run bats directly in bash instead of through npm
+          # Ensure PATH includes our installations
+          export PATH="/usr/local/bin:$PATH"
+          
+          # Debug: Show available commands
+          echo "Available commands:"
+          which shellcheck || echo "shellcheck not found"
+          which bats || echo "bats not found"
+          
+          # Run lint with explicit shellcheck path on Windows
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            /usr/local/bin/bats -r tests
+            echo "Running lint with Windows shellcheck..."
+            /usr/local/bin/shellcheck.exe -x -e SC1091,SC2155,SC2181 gh-switcher.sh || exit 1
           else
-            npm test
+            npm run lint --if-present || exit 1
           fi
-          npm run build --if-present 
+          
+          # Run tests - use bats directly on Windows
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "Running tests with Windows bats..."
+            /usr/local/bin/bats -r tests || exit 1
+          else
+            npm test || exit 1
+          fi
+          
+          # Run build
+          npm run build --if-present || exit 1 

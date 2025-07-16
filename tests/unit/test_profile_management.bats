@@ -14,11 +14,30 @@ teardown() {
 measure_time_ms() {
     local start_ns=$(date +%s%N 2>/dev/null || echo "0")
     if [[ "$start_ns" == "0" ]]; then
-        # macOS doesn't support nanoseconds, use python
-        local start_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
-        "$@" >/dev/null 2>&1
-        local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
-        echo $((end_ms - start_ms))
+        # macOS/Windows don't support nanoseconds
+        # Try python3 first, then python, then perl as fallbacks
+        if command -v python3 >/dev/null 2>&1; then
+            local start_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+            "$@" >/dev/null 2>&1
+            local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
+            echo $((end_ms - start_ms))
+        elif command -v python >/dev/null 2>&1; then
+            local start_ms=$(python -c 'import time; print(int(time.time() * 1000))')
+            "$@" >/dev/null 2>&1
+            local end_ms=$(python -c 'import time; print(int(time.time() * 1000))')
+            echo $((end_ms - start_ms))
+        elif command -v perl >/dev/null 2>&1; then
+            local start_ms=$(perl -MTime::HiRes=time -e 'print int(time * 1000)')
+            "$@" >/dev/null 2>&1
+            local end_ms=$(perl -MTime::HiRes=time -e 'print int(time * 1000)')
+            echo $((end_ms - start_ms))
+        else
+            # Fallback to seconds precision
+            local start_s=$(date +%s)
+            "$@" >/dev/null 2>&1
+            local end_s=$(date +%s)
+            echo $(( (end_s - start_s) * 1000 ))
+        fi
     else
         # Linux supports nanoseconds
         "$@" >/dev/null 2>&1
