@@ -68,6 +68,9 @@ jobs:
           git clone --depth 1 https://github.com/bats-core/bats-core.git
           cd bats-core
           ./install.sh /usr/local
+          
+          # Add to PATH for npm scripts
+          echo "/usr/local/bin" >> $GITHUB_PATH
 
       # Install npm dependencies (none yet, but future-proof)
       - name: Install npm dependencies
