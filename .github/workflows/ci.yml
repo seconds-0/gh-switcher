@@ -200,10 +200,10 @@ jobs:
             echo "Step 3: Running minimal test suite..."
             if [[ -f /usr/local/bin/bats ]]; then
               # Create a minimal test list for Windows
-              cat > windows-minimal-tests.txt << 'EOF'
+              cat > windows-minimal-tests.txt << 'TESTEOF'
 tests/unit/test_users.bats
 tests/unit/test_profiles.bats
-EOF
+TESTEOF
               
               # Run each test file individually to isolate failures
               while read -r test_file; do
