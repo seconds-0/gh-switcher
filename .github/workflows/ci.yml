@@ -80,5 +80,10 @@ jobs:
       - name: Run lint → test → build
         run: |
           npm run lint --if-present
-          npm test
+          # On Windows, run bats directly in bash instead of through npm
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            /usr/local/bin/bats -r tests
+          else
+            npm test
+          fi
           npm run build --if-present 
