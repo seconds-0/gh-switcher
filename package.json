@@ -49,6 +49,7 @@
   "preferGlobal": true,
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ]
 }

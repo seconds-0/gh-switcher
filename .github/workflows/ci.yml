@@ -50,6 +50,19 @@ jobs:
           # zsh is pre-installed on macOS but ensure it's available
           which zsh || brew install zsh
 
+      - name: Install ShellCheck & BATS (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # ShellCheck for Windows
+          curl -L https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.zip -o shellcheck.zip
+          unzip -o shellcheck.zip
+          mv shellcheck-stable.exe /usr/bin/shellcheck.exe
+          
+          # BATS for Windows (Git Bash has bash)
+          git clone --depth 1 https://github.com/bats-core/bats-core.git
+          cd bats-core
+          ./install.sh /usr/local
+
       # Install npm dependencies (none yet, but future-proof)
       - name: Install npm dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
