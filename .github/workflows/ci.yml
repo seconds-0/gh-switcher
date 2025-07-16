@@ -102,23 +102,45 @@ jobs:
           # Ensure PATH includes our installations
           export PATH="/usr/local/bin:$PATH"
           
-          # Debug: Show available commands
+          # Set OSTYPE for Windows if not already set
+          if [[ "${{ runner.os }}" == "Windows" ]] && [[ -z "${OSTYPE}" ]]; then
+            export OSTYPE="msys"
+          fi
+          
+          # Debug: Show environment and available commands
+          echo "Environment info:"
+          echo "RUNNER_OS: ${RUNNER_OS}"
+          echo "runner.os: ${{ runner.os }}"
+          echo "OSTYPE: ${OSTYPE}"
+          echo "PATH: $PATH"
+          echo "PWD: $PWD"
+          echo ""
           echo "Available commands:"
           which shellcheck || echo "shellcheck not found"
           which bats || echo "bats not found"
           
           # Run lint with explicit shellcheck path on Windows
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             echo "Running lint with Windows shellcheck..."
-            /usr/local/bin/shellcheck.exe -x -e SC1091,SC2155,SC2181 gh-switcher.sh || exit 1
+            if [[ -f /usr/local/bin/shellcheck.exe ]]; then
+              /usr/local/bin/shellcheck.exe -x -e SC1091,SC2155,SC2181 gh-switcher.sh || exit 1
+            else
+              echo "ERROR: shellcheck.exe not found at /usr/local/bin/shellcheck.exe"
+              exit 1
+            fi
           else
             npm run lint --if-present || exit 1
           fi
           
           # Run tests - use bats directly on Windows
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             echo "Running tests with Windows bats..."
-            /usr/local/bin/bats -r tests || exit 1
+            if [[ -f /usr/local/bin/bats ]]; then
+              /usr/local/bin/bats -r tests || exit 1
+            else
+              echo "ERROR: bats not found at /usr/local/bin/bats"
+              exit 1
+            fi
           else
             npm test || exit 1
           fi
