@@ -56,28 +56,43 @@ jobs:
           # zsh is pre-installed on macOS but ensure it's available
           which zsh || brew install zsh
 
-      # Windows: Just do basic validation
-      - name: Basic Windows validation
+      # Windows: Install BATS and run focused integration tests
+      - name: Install BATS (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # BATS for Windows (Git Bash has bash)
+          echo "Installing BATS..."
+          git clone --depth 1 https://github.com/bats-core/bats-core.git || exit 1
+          (cd bats-core && ./install.sh /usr/local) || exit 1
+          
+          # Verify BATS installation
+          /usr/local/bin/bats --version || exit 1
+          
+          # Add to PATH for npm scripts
+          echo "/usr/local/bin" >> $GITHUB_PATH
+          export PATH="/usr/local/bin:$PATH"
+          
+      # Windows: Run focused integration tests
+      - name: Windows integration tests
         if: runner.os == 'Windows'
         run: |
           # Set Windows environment
           export OSTYPE="msys"
           export GHS_PERF_MULTIPLIER=3
+          export PATH="/usr/local/bin:$PATH"
           
-          # Test script syntax
-          bash -n gh-switcher.sh || { echo "❌ Script syntax error"; exit 1; }
-          
-          # Test script sourcing
+          # Test script loads correctly
           export GHS_STRICT_MODE="false"
           source ./gh-switcher.sh || { echo "❌ Failed to source script"; exit 1; }
           
-          # Test basic functionality
-          if type cmd_users >/dev/null 2>&1; then
-            echo "✅ Windows Git Bash support verified"
-          else
-            echo "❌ Functions not loaded"
-            exit 1
-          fi
+          # Run ONLY the Windows risk tests
+          echo "Running focused Windows integration tests..."
+          /usr/local/bin/bats tests/integration/test_windows_risks.bats || {
+              echo "❌ Windows integration tests failed"
+              exit 1
+          }
+          
+          echo "✅ Windows risk tests passed"
 
       # Install npm dependencies (none yet, but future-proof)
       - name: Install npm dependencies
