@@ -93,7 +93,7 @@ teardown() {
     
     # Then
     assert_failure
-    assert_output_contains "suspicious patterns"
+    assert_output_contains "directory traversal patterns"
 }
 
 # Test SSH configuration application
