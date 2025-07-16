@@ -5,6 +5,12 @@
 load '../helpers/test_helper'
 
 setup() {
+    # Skip zsh tests on Windows as zsh isn't available
+    [[ "$OSTYPE" == "msys" ]] && skip "Zsh not available on Windows CI"
+    
+    # Also skip if zsh isn't installed
+    command -v zsh >/dev/null 2>&1 || skip "Zsh is not installed"
+    
     setup_test_environment
 }
 
