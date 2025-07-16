@@ -17,6 +17,12 @@ jobs:
         shell: bash
 
     steps:
+      # Configure git to use LF on Windows
+      - name: Set git to use LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          
       # Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
