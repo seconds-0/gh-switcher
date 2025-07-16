@@ -237,7 +237,8 @@ measure_time_ms() {
     local duration=$(measure_time_ms ghs show perfuser)
     echo "# Duration: ${duration}ms" >&3
     # Allow up to 300ms for bash script startup overhead in CI environments
-    [[ "$duration" -lt 300 ]]
+    local timeout=$(get_timeout_ms 300)
+    [[ "$duration" -lt "$timeout" ]]
 }
 
 @test "ghs edit completes within reasonable time" {
@@ -247,7 +248,8 @@ measure_time_ms() {
     local duration=$(measure_time_ms ghs edit perfuser --name "New Name")
     echo "# Duration: ${duration}ms" >&3
     # Allow up to 350ms for bash script startup overhead and file operations in CI
-    [[ "$duration" -lt 350 ]]
+    local timeout=$(get_timeout_ms 350)
+    [[ "$duration" -lt "$timeout" ]]
 }
 
 # Tests for refactored functions

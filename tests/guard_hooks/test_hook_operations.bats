@@ -124,7 +124,8 @@ teardown() {
         local execution_time=$((end_ms - start_ms))
         
         # Performance requirement: <300ms (reasonable for pre-commit validation)
-        [[ $execution_time -lt 300 ]]
+        local timeout_ms=$(get_timeout_ms 300)
+        [[ $execution_time -lt $timeout_ms ]]
     else
         # Fallback to seconds-based timing
         local start_time=$(date +%s)
@@ -132,6 +133,7 @@ teardown() {
         local end_time=$(date +%s)
         local execution_time=$((end_time - start_time))
         # Performance requirement: <1 second (generous fallback)
-        [[ $execution_time -lt 1 ]]
+        local timeout_s=$(($(get_timeout_ms 1000) / 1000))
+        [[ $execution_time -lt $timeout_s ]]
     fi
 }

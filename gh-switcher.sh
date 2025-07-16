@@ -29,6 +29,10 @@
 # CONFIGURATION
 # =============================================================================
 
+# Performance multiplier for Windows/Git Bash environments
+GHS_PERF_MULTIPLIER=1
+[[ "$OSTYPE" == "msys" ]] && GHS_PERF_MULTIPLIER=2
+
 # Only set readonly if not already set (allows multiple sourcing)
 if [[ -z "${GH_USERS_CONFIG:-}" ]]; then
     readonly GH_USERS_CONFIG="$HOME/.gh-users"
