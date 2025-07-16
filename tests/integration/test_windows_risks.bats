@@ -7,6 +7,9 @@ load '../helpers/ssh_helper'
 load '../helpers/git_helper'
 
 setup() {
+    # Debug output for CI
+    echo "# DEBUG: OSTYPE=$OSTYPE, RUNNER_OS=$RUNNER_OS, /c/Windows exists: $([[ -d "/c/Windows" ]] && echo yes || echo no)" >&3
+    
     # Only run on Windows - check multiple conditions
     if [[ "$OSTYPE" != "msys" ]] && [[ "$RUNNER_OS" != "Windows" ]] && [[ ! -d "/c/Windows" ]]; then
         skip "Windows-specific test"

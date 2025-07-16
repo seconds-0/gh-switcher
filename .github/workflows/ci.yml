@@ -87,7 +87,8 @@ jobs:
           
           # Run ONLY the Windows risk tests
           echo "Running focused Windows integration tests..."
-          /usr/local/bin/bats tests/integration/test_windows_risks.bats || {
+          echo "Environment: OSTYPE=$OSTYPE, RUNNER_OS=$RUNNER_OS"
+          OSTYPE="msys" RUNNER_OS="Windows" /usr/local/bin/bats tests/integration/test_windows_risks.bats || {
               echo "❌ Windows integration tests failed"
               exit 1
           }
