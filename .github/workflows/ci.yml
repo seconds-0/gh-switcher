@@ -56,7 +56,7 @@ jobs:
           # ShellCheck for Windows
           curl -L https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.zip -o shellcheck.zip
           unzip -o shellcheck.zip
-          mv shellcheck-stable.exe /usr/bin/shellcheck.exe
+          mv shellcheck.exe /usr/bin/shellcheck.exe
           
           # BATS for Windows (Git Bash has bash)
           git clone --depth 1 https://github.com/bats-core/bats-core.git
