@@ -5,8 +5,10 @@
 load '../helpers/test_helper'
 
 setup() {
-    # Only run on Windows
-    [[ "$OSTYPE" != "msys" ]] && skip "Windows-specific test"
+    # Only run on Windows - check multiple conditions
+    if [[ "$OSTYPE" != "msys" ]] && [[ "$RUNNER_OS" != "Windows" ]] && [[ ! -d "/c/Windows" ]]; then
+        skip "Windows-specific test"
+    fi
     
     setup_test_environment
     # Add a test user
