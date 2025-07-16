@@ -259,9 +259,10 @@ validate_ssh_key() {
     # Expand tilde first
     key_path="${key_path/#~/$HOME}"
     
-    # Check for directory traversal and suspicious patterns
-    if [[ "$key_path" =~ \.\. ]] || [[ "$key_path" =~ /\.\./ ]]; then
-        echo "❌ SSH key path contains suspicious patterns" >&2
+    # Check for directory traversal patterns
+    # Only match actual ".." path components, not any two dots
+    if [[ "$key_path" =~ (^|/)\.\.(/|$) ]]; then
+        echo "❌ SSH key path contains directory traversal patterns" >&2
         return 1
     fi
     
