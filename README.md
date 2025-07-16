@@ -129,8 +129,10 @@ ghs update bob gpg "XYZ789GHI"
   - **Bash** - Full native support
   - **Zsh** - Full native support  
   - **Fish** - Via wrapper function ([setup guide](docs/FISH_SETUP.md))
-  - **Dash/POSIX sh** - Not supported (invoke via bash)
   - Works in **VS Code integrated terminal**
+- Not supported:
+  - **PowerShell** - gh-switcher is a bash script ([Windows users guide](docs/WINDOWS_USERS.md))
+  - **Dash/POSIX sh** - Requires bash features ([POSIX shell guide](docs/POSIX_SHELL_USAGE.md))
 
 ## Development Setup (Contributors)
 
