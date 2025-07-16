@@ -3,6 +3,8 @@
 # Focused Windows integration tests for real risks
 
 load '../helpers/test_helper'
+load '../helpers/ssh_helper'
+load '../helpers/git_helper'
 
 setup() {
     # Only run on Windows - check multiple conditions
@@ -11,11 +13,16 @@ setup() {
     fi
     
     setup_test_environment
+    setup_test_ssh_environment
+    setup_git_test_environment
+    
     # Add a test user
     cmd_add "testuser" >/dev/null 2>&1
 }
 
 teardown() {
+    cleanup_git_test_environment
+    cleanup_test_ssh_environment
     cleanup_test_environment
 }
 
