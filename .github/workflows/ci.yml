@@ -103,7 +103,10 @@ jobs:
           export PATH="/usr/local/bin:$PATH"
           
           # Set OSTYPE for Windows if not already set
-          if [[ "${{ runner.os }}" == "Windows" ]] && [[ -z "${OSTYPE}" ]]; then
+          # Also set a simple flag for easier detection
+          IS_WINDOWS="false"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            IS_WINDOWS="true"
             export OSTYPE="msys"
           fi
           
@@ -112,15 +115,19 @@ jobs:
           echo "RUNNER_OS: ${RUNNER_OS}"
           echo "runner.os: ${{ runner.os }}"
           echo "OSTYPE: ${OSTYPE}"
+          echo "IS_WINDOWS: ${IS_WINDOWS}"
           echo "PATH: $PATH"
           echo "PWD: $PWD"
           echo ""
           echo "Available commands:"
           which shellcheck || echo "shellcheck not found"
           which bats || echo "bats not found"
+          echo ""
+          echo "Files in /usr/local/bin:"
+          ls -la /usr/local/bin/ | head -20 || echo "Cannot list /usr/local/bin"
           
           # Run lint with explicit shellcheck path on Windows
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
+          if [[ "${IS_WINDOWS}" == "true" ]]; then
             echo "Running lint with Windows shellcheck..."
             if [[ -f /usr/local/bin/shellcheck.exe ]]; then
               /usr/local/bin/shellcheck.exe -x -e SC1091,SC2155,SC2181 gh-switcher.sh || exit 1
@@ -133,7 +140,7 @@ jobs:
           fi
           
           # Run tests - use bats directly on Windows
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
+          if [[ "${IS_WINDOWS}" == "true" ]]; then
             echo "Running tests with Windows bats..."
             if [[ -f /usr/local/bin/bats ]]; then
               /usr/local/bin/bats -r tests || exit 1
