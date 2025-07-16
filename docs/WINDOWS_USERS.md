@@ -2,6 +2,15 @@
 
 gh-switcher is a bash script and does not run natively in PowerShell.
 
+## Git Bash Support Status
+
+✅ **Git Bash is tested in CI** - Core functionality works on Windows via Git Bash.
+
+Known limitations on Windows:
+- SSH key permissions cannot be strictly enforced (NTFS limitation)
+- Performance is ~2x slower than Linux/macOS
+- Some tests are skipped on Windows
+
 ## Recommended Options for Windows
 
 ### Option 1: WSL (Windows Subsystem for Linux) - Recommended
