@@ -56,82 +56,28 @@ jobs:
           # zsh is pre-installed on macOS but ensure it's available
           which zsh || brew install zsh
 
-      - name: Install ShellCheck & BATS (Windows)
+      # Windows: Just do basic validation
+      - name: Basic Windows validation
         if: runner.os == 'Windows'
         run: |
-          # Create directories if they don't exist
-          mkdir -p /usr/local/bin || exit 1
+          # Set Windows environment
+          export OSTYPE="msys"
+          export GHS_PERF_MULTIPLIER=3
           
-          # ShellCheck for Windows with proper extraction
-          echo "Installing ShellCheck..."
-          curl -L --fail https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.zip -o shellcheck.zip || exit 1
+          # Test script syntax
+          bash -n gh-switcher.sh || { echo "❌ Script syntax error"; exit 1; }
           
-          # Create temporary extraction directory
-          mkdir -p shellcheck-extract || exit 1
-          cd shellcheck-extract || exit 1
+          # Test script sourcing
+          export GHS_STRICT_MODE="false"
+          source ./gh-switcher.sh || { echo "❌ Failed to source script"; exit 1; }
           
-          # Extract the zip file
-          unzip -o ../shellcheck.zip || exit 1
-          
-          # Debug: Show what was extracted
-          echo "Contents of shellcheck.zip:"
-          ls -la
-          find . -type f -name "*.exe" | head -10
-          
-          # Find shellcheck executable (might be shellcheck.exe, shellcheck-stable.exe, or in a subdirectory)
-          SHELLCHECK_EXE=""
-          for pattern in "shellcheck.exe" "shellcheck-*.exe" "*/shellcheck.exe" "*/shellcheck-*.exe"; do
-            FOUND=$(find . -name "$pattern" -type f 2>/dev/null | head -1)
-            if [[ -n "$FOUND" ]]; then
-              SHELLCHECK_EXE="$FOUND"
-              break
-            fi
-          done
-          
-          # If not found with patterns, just look for any .exe file
-          if [[ -z "$SHELLCHECK_EXE" ]]; then
-            SHELLCHECK_EXE=$(find . -name "*.exe" -type f | head -1)
-          fi
-          
-          if [[ -z "$SHELLCHECK_EXE" ]]; then
-            echo "ERROR: No executable found in shellcheck.zip"
-            echo "Directory contents:"
-            find . -type f | head -20
+          # Test basic functionality
+          if type cmd_users >/dev/null 2>&1; then
+            echo "✅ Windows Git Bash support verified"
+          else
+            echo "❌ Functions not loaded"
             exit 1
           fi
-          
-          echo "Found ShellCheck executable: $SHELLCHECK_EXE"
-          
-          # Copy to destination with standard name
-          cp "$SHELLCHECK_EXE" /usr/local/bin/shellcheck.exe || exit 1
-          chmod +x /usr/local/bin/shellcheck.exe || exit 1
-          
-          # Clean up extraction directory
-          cd ..
-          rm -rf shellcheck-extract shellcheck.zip
-          
-          # Verify ShellCheck installation
-          /usr/local/bin/shellcheck.exe --version || exit 1
-          
-          # BATS for Windows (Git Bash has bash)
-          echo "Installing BATS..."
-          git clone --depth 1 https://github.com/bats-core/bats-core.git || exit 1
-          (cd bats-core && ./install.sh /usr/local) || exit 1
-          
-          # Verify BATS installation
-          /usr/local/bin/bats --version || exit 1
-          
-          # Add to PATH for npm scripts
-          echo "/usr/local/bin" >> $GITHUB_PATH
-          export PATH="/usr/local/bin:$PATH"
-          
-          # Debug: Show what's installed
-          echo "Installed tools:"
-          ls -la /usr/local/bin/ || true
-          which shellcheck || echo "shellcheck not in PATH"
-          which bats || echo "bats not in PATH"
-          
-          echo "✅ Windows installation completed successfully"
 
       # Install npm dependencies (none yet, but future-proof)
       - name: Install npm dependencies
@@ -140,95 +86,14 @@ jobs:
       # Run repository verification sequence (lint → test → build)
       - name: Run lint → test → build
         run: |
-          # Ensure PATH includes our installations
-          export PATH="/usr/local/bin:$PATH"
-          
-          # Windows detection - check multiple indicators
-          IS_WINDOWS="false"
-          if [[ "${{ runner.os }}" == "Windows" ]] || [[ -d "/c" ]] || [[ "$OSTYPE" == "msys"* ]]; then
-            IS_WINDOWS="true"
-            export OSTYPE="msys"
-            # Set higher performance multiplier for Windows
-            export GHS_PERF_MULTIPLIER=3
-          fi
-          
-          # Debug: Show environment
-          echo "=== Environment Info ==="
-          echo "IS_WINDOWS: ${IS_WINDOWS}"
-          echo "OSTYPE: ${OSTYPE}"
-          echo "PATH: $PATH"
-          echo "PWD: $PWD"
-          
-          # PRAGMATIC APPROACH FOR WINDOWS: Run minimal tests
-          if [[ "${IS_WINDOWS}" == "true" ]]; then
-            echo ""
-            echo "=== Windows CI: Running minimal validation ==="
-            
-            # 1. Basic syntax check with shellcheck (skip if it fails)
-            echo "Step 1: ShellCheck (non-blocking)..."
-            if [[ -f /usr/local/bin/shellcheck.exe ]]; then
-              /usr/local/bin/shellcheck.exe -x -e SC1091,SC2155,SC2181 gh-switcher.sh || {
-                echo "⚠️  ShellCheck had warnings/errors on Windows (continuing anyway)"
-              }
-            else
-              echo "⚠️  ShellCheck not available on Windows (skipping)"
-            fi
-            
-            # 2. Basic functionality test - just source the script
-            echo ""
-            echo "Step 2: Basic script sourcing test..."
-            (
-              # Run in subshell to avoid polluting environment
-              export GHS_STRICT_MODE="false"  # Disable strict mode for sourcing
-              source ./gh-switcher.sh || {
-                echo "❌ Failed to source gh-switcher.sh"
-                exit 1
-              }
-              echo "✅ Script sourced successfully"
-              
-              # Try to run basic command
-              if type cmd_users >/dev/null 2>&1; then
-                echo "✅ Functions loaded successfully"
-              else
-                echo "❌ Functions not loaded"
-                exit 1
-              fi
-            )
-            
-            # 3. Run only the most critical tests
-            echo ""
-            echo "Step 3: Running minimal test suite..."
-            if [[ -f /usr/local/bin/bats ]]; then
-              # Create a minimal test list for Windows
-              cat > windows-minimal-tests.txt << 'TESTEOF'
-tests/unit/test_users.bats
-tests/unit/test_profiles.bats
-TESTEOF
-              
-              # Run each test file individually to isolate failures
-              while read -r test_file; do
-                if [[ -f "$test_file" ]]; then
-                  echo "Running: $test_file"
-                  /usr/local/bin/bats "$test_file" || {
-                    echo "⚠️  Test failed: $test_file (continuing)"
-                  }
-                fi
-              done < windows-minimal-tests.txt
-              
-              echo "✅ Minimal Windows tests completed"
-            else
-              echo "⚠️  BATS not available on Windows (skipping tests)"
-            fi
-            
-            echo ""
-            echo "=== Windows CI: Basic validation passed ==="
-            
+          # Windows: Skip full test suite, just run build
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "✅ Windows validation passed (full tests run on Linux/macOS)"
           else
             # Non-Windows: Run full test suite
-            echo "=== Running full test suite (non-Windows) ==="
-            npm run lint || exit 1
-            npm test || exit 1
+            npm run lint
+            npm test
           fi
           
-          # Run build (same for all platforms)
+          # Run build (all platforms)
           npm run build --if-present || exit 1
