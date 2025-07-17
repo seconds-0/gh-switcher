@@ -47,6 +47,13 @@ fi
 
 # Initialize configuration files
 init_config() {
+    # Protect against Fish shell variable conflicts
+    if [[ -n "${FISH_VERSION:-}" ]]; then
+        unset FISH_VERSION 2>/dev/null || true
+        unset fish_greeting 2>/dev/null || true
+        unset __fish_git_prompt_showdirtystate 2>/dev/null || true
+    fi
+    
     # Ensure variables are set (defensive programming for shell environments)
     : "${GH_USERS_CONFIG:=$HOME/.gh-users}"
     : "${GH_USER_PROFILES:=$HOME/.gh-user-profiles}"
@@ -2636,11 +2643,11 @@ auto_switch_check_debug() {
     
     local profile_email
     profile_email=$(profile_get_field "$profile" "email")
-    echo "[DEBUG] Profile email: $profile_email"
+    # echo "[DEBUG] Profile email: $profile_email"
     
     # Check if already on correct profile
     if [[ "$profile_email" == "$current_email" ]]; then
-        echo "[DEBUG] Already on correct profile"
+        # echo "[DEBUG] Already on correct profile"
         return 0
     fi
     
@@ -2818,13 +2825,13 @@ cmd_status() {
     else
         # Check if current config matches any profile
         local config_status="⚠️ "
-        if [[ -n "$current_git_email" ]]; then
+        if [[ -n "${current_git_email:-}" ]]; then
             while IFS= read -r username; do
                 if [[ -n "$username" ]]; then
                     local profile profile_email
                     if profile=$(profile_get "$username" 2>/dev/null); then
                         profile_email=$(profile_get_field "$profile" "email" 2>/dev/null) || profile_email=""
-                        if [[ "$profile_email" == "$current_git_email" ]]; then
+                        if [[ "$profile_email" == "${current_git_email:-}" ]]; then
                             matches_profile=true
                             config_status="✅ "
                             break
@@ -2836,9 +2843,9 @@ cmd_status() {
         
         # Format name and email with host info if available
         local config_display=""
-        if [[ -n "$current_git_name" && -n "$current_git_email" ]]; then
+        if [[ -n "${current_git_name:-}" && -n "${current_git_email:-}" ]]; then
             config_display="$current_git_name <$current_git_email>"
-        elif [[ -n "$current_git_email" ]]; then
+        elif [[ -n "${current_git_email:-}" ]]; then
             config_display="<$current_git_email>"
         elif [[ -n "$current_git_name" ]]; then
             config_display="$current_git_name <no email set>"
@@ -2849,7 +2856,7 @@ cmd_status() {
         # Add host info if we found a matching profile with non-default host
         local host_info=""
         # Simple host detection without complex logic to avoid debug output
-        if [[ -n "$current_git_email" && -f "$GH_USER_PROFILES" ]]; then
+        if [[ -n "${current_git_email:-}" && -f "$GH_USER_PROFILES" ]]; then
             local host_line
             host_line=$(grep -F "$current_git_email" "$GH_USER_PROFILES" 2>/dev/null | head -1 || true)
             if [[ -n "$host_line" ]]; then
@@ -2902,10 +2909,10 @@ cmd_status() {
             fi
             
             # Add active user marker using simple email matching
-            if [[ -n "$current_git_email" && -f "$GH_USER_PROFILES" ]]; then
+            if [[ -n "${current_git_email:-}" && -f "$GH_USER_PROFILES" ]]; then
                 local user_email
                 user_email=$(grep "^${username}	" "$GH_USER_PROFILES" 2>/dev/null | head -1 | cut -d$'\t' -f3)
-                if [[ "$user_email" == "$current_git_email" ]]; then
+                if [[ "$user_email" == "${current_git_email:-}" ]]; then
                     flags="$flags ► Active"
                 fi
             fi
@@ -2957,7 +2964,7 @@ cmd_status() {
                 local other_profile other_email
                 if other_profile=$(profile_get "$other_user" 2>/dev/null); then
                     other_email=$(profile_get_field "$other_profile" "email" 2>/dev/null) || other_email=""
-                    if [[ "$other_email" != "$current_git_email" ]]; then
+                    if [[ "$other_email" != "${current_git_email:-}" ]]; then
                         switch_num="$j"
                         switch_name="$other_user"
                         break
