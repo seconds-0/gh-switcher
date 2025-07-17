@@ -3114,16 +3114,6 @@ ghs() {
     # Initialize configuration
     init_config
     
-    # VS Code terminal detection and warning (skip in test environments)
-    if [[ "${TERM_PROGRAM:-}" == "vscode" ]] && [[ -z "${GHS_VSCODE_WARNING_SHOWN:-}" ]] && [[ -z "${BATS_TEST_FILENAME:-}" ]]; then
-        export GHS_VSCODE_WARNING_SHOWN=1
-        echo "ℹ️  VS Code Terminal Detected"
-        echo "   gh-switcher cannot be fully tested in VS Code's integrated terminal."
-        echo "   If you experience issues, please report them at:"
-        echo "   https://github.com/seconds-0/gh-switcher/issues"
-        echo
-    fi
-    
     case "$cmd" in
         add)              cmd_add "$@" ;;
         remove|rm)        cmd_remove "$@" ;;

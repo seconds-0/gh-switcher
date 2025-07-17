@@ -60,6 +60,9 @@ ghs switch 2    # Switch to second account
 
 # Assign account to current project
 ghs assign 1    # Use account 1 for this project
+
+# Enable automatic switching (one-time setup)
+ghs auto-switch enable    # Switch accounts automatically when entering directories
 ```
 
 ## Commands
@@ -69,6 +72,13 @@ ghs assign 1    # Use account 1 for this project
 - `ghs` - Show smart dashboard with current status
 - `ghs switch <number>` - Switch to user by number
 - `ghs assign <number>` - Assign user as project default
+
+### Auto-Switch (Directory-Based)
+
+- `ghs auto-switch enable` - Turn on automatic switching when entering directories
+- `ghs auto-switch disable` - Turn off automatic switching
+- `ghs auto-switch status` - Show current auto-switch configuration
+- `ghs auto-switch test` - Preview what would happen in current directory
 
 ### User Management
 
