@@ -20,6 +20,7 @@ Lightning-fast GitHub account switcher for developers with multiple identities. 
 - [x] **Enhanced Error States** - Verbose, actionable error messages with fix commands
 - [x] **SSH Key Testing** - Verify SSH keys authenticate with GitHub during `add` and via `test-ssh` command
 - [x] **Multi-Host Support** - Support for GitHub Enterprise with `--host` parameter, v4 profile format
+- [x] **Directory Auto-Switch** - Automatic profile switching when entering assigned directories
 
 ## In Progress 🚧
 
@@ -47,11 +48,6 @@ ghs list --global
 # charlie-oss (used in: ~/projects/contrib)
 ```
 
-### Directory Auto-Switch Enhancement
-Complete the auto-switching experience:
-- [ ] Shell integration (cd hooks)
-- [ ] Parent directory inheritance
-- [ ] Opt-out safe mode
 
 ## Low Priority Features 💭
 

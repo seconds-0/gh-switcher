@@ -199,36 +199,23 @@ teardown() {
     assert_output_contains "Guard hooks work in VS Code"
 }
 
-# Test 5: VS Code Bash - Warning message appears on first run (outside test environment)
-@test "e2e: VS Code bash - shows warning on first run" {
+# Test 5: VS Code Bash - No warning needed anymore (functionality verified in other tests)
+@test "e2e: VS Code bash - works seamlessly without warnings" {
     local script_path="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/gh-switcher.sh"
     
-    # Test first run - should show warning when NOT in BATS test environment
+    # Test that VSCode terminal works without any warnings
     run bash -c "
         export TERM_PROGRAM=vscode
-        unset BATS_TEST_FILENAME  # Simulate non-test environment
-        source '$script_path'
-        ghs status 2>&1
-    "
-    
-    assert_success
-    assert_output_contains "VS Code Terminal Detected"
-    assert_output_contains "gh-switcher cannot be fully tested"
-    
-    # Test that warning is suppressed in test environments
-    run bash -c "
-        export TERM_PROGRAM=vscode
-        export BATS_TEST_FILENAME='test.bats'  # Simulate test environment
         source '$script_path'
         output=\$(ghs status 2>&1)
-        if echo \"\$output\" | grep -q 'VS Code Terminal Detected'; then
-            echo 'ERROR: Warning shown in test environment'
+        if echo \"\$output\" | grep -qi 'warning\\|cannot be\\|detected'; then
+            echo 'ERROR: Unexpected warning shown'
             exit 1
         else
-            echo 'SUCCESS: Warning suppressed in test environment'
+            echo 'SUCCESS: No warnings in VSCode terminal'
         fi
     "
     
     assert_success
-    assert_output_contains "SUCCESS: Warning suppressed in test environment"
+    assert_output_contains "SUCCESS: No warnings in VSCode terminal"
 }
