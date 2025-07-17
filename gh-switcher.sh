@@ -1899,7 +1899,10 @@ cmd_users() {
             # Count assigned directories
             if [[ -f "$GH_PROJECT_CONFIG" ]]; then
                 local dir_count
+                # Ensure dir_count is a clean numeric value (handle potential multiple lines from grep)
                 dir_count=$(grep -c "^[^|]*|${username}$" "$GH_PROJECT_CONFIG" 2>/dev/null || echo "0")
+                dir_count="${dir_count//[^0-9]/}"  # Remove any non-numeric characters
+                [[ -z "$dir_count" ]] && dir_count=0
                 if [[ $dir_count -gt 0 ]]; then
                     if [[ $dir_count -eq 1 ]]; then
                         dir_info=" (1 dir)"
@@ -2801,7 +2804,7 @@ cmd_status() {
     local gh_user_display="$gh_user"
     if [[ -n "$gh_user" && -f "$GH_USER_PROFILES" ]]; then
         local user_host
-        user_host=$(grep "^${gh_user}	" "$GH_USER_PROFILES" | cut -d$'\t' -f5)
+        user_host=$(grep "^${gh_user}	" "$GH_USER_PROFILES" 2>/dev/null | cut -d$'\t' -f5 || true)
         if [[ -n "$user_host" && "$user_host" != "github.com" ]]; then
             gh_user_display="$gh_user ($user_host)"
         fi
@@ -2829,7 +2832,7 @@ cmd_status() {
                         fi
                     fi
                 fi
-            done < <(cat "$GH_USERS_CONFIG" 2>/dev/null || true)
+            done < "$GH_USERS_CONFIG" 2>/dev/null
         fi
         
         # Format name and email with host info if available
@@ -2849,7 +2852,7 @@ cmd_status() {
         # Simple host detection without complex logic to avoid debug output
         if [[ -n "$current_git_email" && -f "$GH_USER_PROFILES" ]]; then
             local host_line
-            host_line=$(grep -F "$current_git_email" "$GH_USER_PROFILES" 2>/dev/null | head -1)
+            host_line=$(grep -F "$current_git_email" "$GH_USER_PROFILES" 2>/dev/null | head -1 || true)
             if [[ -n "$host_line" ]]; then
                 local host_field
                 host_field=$(echo "$host_line" | cut -d$'\t' -f5 2>/dev/null)
@@ -2916,7 +2919,10 @@ cmd_status() {
             # Count assigned directories for this user
             local dir_count=0
             if [[ -f "$GH_PROJECT_CONFIG" ]]; then
+                # Ensure dir_count is a clean numeric value (handle potential multiple lines from grep)
                 dir_count=$(grep -c "^[^|]*|${username}$" "$GH_PROJECT_CONFIG" 2>/dev/null || echo "0")
+                dir_count="${dir_count//[^0-9]/}"  # Remove any non-numeric characters
+                [[ -z "$dir_count" ]] && dir_count=0
                 if [[ $dir_count -gt 0 ]]; then
                     flags="$flags <$dir_count dirs>"
                 fi
@@ -2925,7 +2931,7 @@ cmd_status() {
             printf "  %d. %-20s%s\n" "$i" "$username" "$flags"
             i=$((i + 1))
         fi
-    done < <(cat "$GH_USERS_CONFIG" 2>/dev/null || true)
+    done < "$GH_USERS_CONFIG" 2>/dev/null
     
     echo
     echo "⚡ Quick actions:"
