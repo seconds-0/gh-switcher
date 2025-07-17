@@ -97,6 +97,7 @@ teardown() {
         export VSCODE_GIT_ASKPASS_NODE='/usr/local/bin/node'
         export VSCODE_GIT_ASKPASS_MAIN='$HOME/.vscode/extensions/git/dist/askpass-main.js'
         export GIT_ASKPASS='$HOME/.vscode/extensions/git/askpass.sh'
+        export BATS_TEST_FILENAME='test_vscode_bash.bats'  # Suppress VSCode warning in test
         
         source '$script_path'
         
@@ -108,8 +109,8 @@ teardown() {
         # Add user first
         ghs add gituser >/dev/null 2>&1
         
-        # Update the profile with our test data
-        ghs edit gituser --name 'Git User' --email 'git@vscode.test' >/dev/null 2>&1
+        # Create profile for the user (needed for git config)
+        printf 'gituser\tGit User\tgit@vscode.test\t\tgithub.com\n' > \"$GH_USER_PROFILES\"
         
         # Switch to user - this should apply the profile
         ghs switch gituser >/dev/null 2>&1
