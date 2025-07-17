@@ -2818,7 +2818,6 @@ cmd_status() {
     else
         # Check if current config matches any profile
         local config_status="⚠️ "
-        local matches_profile=false
         if [[ -n "$current_git_email" ]]; then
             while IFS= read -r username; do
                 if [[ -n "$username" ]]; then
@@ -2832,7 +2831,7 @@ cmd_status() {
                         fi
                     fi
                 fi
-            done < "$GH_USERS_CONFIG" 2>/dev/null
+            done < <(cat "$GH_USERS_CONFIG" 2>/dev/null || true)
         fi
         
         # Format name and email with host info if available
@@ -2931,7 +2930,7 @@ cmd_status() {
             printf "  %d. %-20s%s\n" "$i" "$username" "$flags"
             i=$((i + 1))
         fi
-    done < "$GH_USERS_CONFIG" 2>/dev/null
+    done < <(cat "$GH_USERS_CONFIG" 2>/dev/null || true)
     
     echo
     echo "⚡ Quick actions:"
