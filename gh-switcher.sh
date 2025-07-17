@@ -1512,7 +1512,8 @@ cmd_remove() {
             if [[ ! -f "$GH_USERS_CONFIG" ]] || [[ ! -s "$GH_USERS_CONFIG" ]]; then
                 echo "❌ No users configured" >&2
             else
-                echo "❌ User ID $input not found" >&2
+                echo "❌ Error: User ID $input not found" >&2
+                echo "   💡 Fix: Run 'ghs users' to see available users" >&2
             fi
             return 1
         }
@@ -1521,7 +1522,8 @@ cmd_remove() {
     fi
     
     if ! user_exists "$username"; then
-        echo "❌ User $username not found" >&2
+        echo "❌ Error: User '$username' not found" >&2
+        echo "   💡 Fix: Run 'ghs users' to see available users" >&2
         return 1
     fi
     
@@ -1538,6 +1540,7 @@ cmd_remove() {
 
 # Switch user command
 cmd_switch() {
+    set +x  # Disable debug mode to prevent variable assignment traces
     local input="$1"
     
     if [[ -z "$input" ]]; then
@@ -1559,15 +1562,16 @@ cmd_switch() {
     fi
     
     if ! user_exists "$username"; then
-        echo "❌ User $username not found" >&2
+        echo "❌ Error: User '$username' not found" >&2
+        echo "   💡 Fix: Run 'ghs users' to see available users" >&2
         return 1
     fi
     
     # Pre-flight check
     local profile
     profile=$(profile_get "$username") || {
-        echo "❌ Cannot switch - no profile"
-        echo "   Fix: ghs edit $username --email <email>"
+        echo "❌ Error: Cannot switch - no profile for $username"
+        echo "   💡 Fix: ghs edit $username --email <email>"
         return 1
     }
     
@@ -1604,8 +1608,30 @@ cmd_switch() {
         else
             echo "✅ Switched to user: $username"
         fi
+        
+        # Show what was configured (using git config to avoid debug output)
+        local name email
+        name=$(git config user.name 2>/dev/null)
+        email=$(git config user.email 2>/dev/null)
+        
+        echo "   Git config: $name <$email>"
+        
+        # Check SSH key from profile
+        local ssh_key_line
+        ssh_key_line=$(echo "$profile" | grep "^ssh_key:" | head -1)
+        if [[ -n "$ssh_key_line" ]]; then
+            local ssh_key_path="${ssh_key_line#ssh_key:}"
+            if [[ -n "$ssh_key_path" && -f "$ssh_key_path" ]]; then
+                echo "   SSH: ${ssh_key_path/#$HOME/~}"
+            else
+                echo "   SSH: Using HTTPS"
+            fi
+        else
+            echo "   SSH: Using HTTPS"
+        fi
     else
-        echo "❌ Failed to switch to user: $username" >&2
+        echo "❌ Error: Failed to switch to user: $username" >&2
+        echo "   💡 Fix: Run 'ghs doctor' to diagnose issues" >&2
         return 1
     fi
 }
@@ -1785,7 +1811,8 @@ cmd_assign() {
     fi
     
     if ! user_exists "$username"; then
-        echo "❌ User $username not found" >&2
+        echo "❌ Error: User '$username' not found" >&2
+        echo "   💡 Fix: Run 'ghs users' to see available users" >&2
         return 1
     fi
     
@@ -1841,18 +1868,17 @@ cmd_users() {
             local dir_info=""
             
             # Get profile details
-            local profile
+            local profile profile_email host
             if profile=$(profile_get "$username" 2>/dev/null); then
                 # Check if this user is active
-                local profile_email
-                profile_email=$(profile_get_field "$profile" "email")
+                profile_email=$(profile_get_field "$profile" "email" 2>/dev/null) || profile_email=""
                 if [[ "$profile_email" == "$current_git_email" ]]; then
                     active_marker="► "
                 else
                     active_marker="  "
                 fi
                 
-                local host=$(profile_get_field "$profile" "host")
+                host=$(profile_get_field "$profile" "host" 2>/dev/null) || host=""
                 if [[ -n "$host" ]] && [[ "$host" != "github.com" ]]; then
                     host_info=" ($host)"
                 fi
@@ -1922,8 +1948,8 @@ cmd_show() {
     # Get profile data
     local profile
     profile=$(profile_get "$username" 2>/dev/null) || {
-        echo "❌ No profile for $username"
-        echo "   Fix: ghs edit $username --email <email>"
+        echo "❌ Error: No profile for $username"
+        echo "   💡 Fix: ghs edit $username --email <email>"
         return 1
     }
     
@@ -1974,6 +2000,22 @@ cmd_show() {
         echo "   Status: Inactive (current: $current_gh_user)"
     else
         echo "   Status: Inactive"
+    fi
+    
+    # Show assigned directories
+    if [[ -f "$GH_PROJECT_CONFIG" ]]; then
+        local assigned_dirs
+        assigned_dirs=$(grep "^[^|]*|${username}$" "$GH_PROJECT_CONFIG" 2>/dev/null | cut -d'|' -f1)
+        if [[ -n "$assigned_dirs" ]]; then
+            echo "   Assigned directories:"
+            echo "$assigned_dirs" | while IFS= read -r dir_path; do
+                [[ -n "$dir_path" ]] && echo "     ${dir_path/#$HOME/~}"
+            done
+        else
+            echo "   Assigned directories: None"
+        fi
+    else
+        echo "   Assigned directories: None"
     fi
     
     # Run checks
@@ -2698,6 +2740,9 @@ auto_switch_check() {
 # 3. Helpful suggestions for fixing detected issues
 # Each check provides distinct value and splitting would reduce clarity.
 cmd_status() {
+    # Disable debug mode temporarily to prevent variable assignment traces
+    set +x
+    
     # Check if any users are configured
     if [[ $(user_count) -eq 0 ]]; then
         echo "🎯 GitHub Project Switcher (ghs)"
@@ -2747,7 +2792,17 @@ cmd_status() {
     
     # Display header
     echo "📍 Current project: $project"
-    echo "🔐 GitHub CLI user: $gh_user"
+    
+    # Show GitHub CLI user with host info if available
+    local gh_user_display="$gh_user"
+    if [[ -n "$gh_user" && -f "$GH_USER_PROFILES" ]]; then
+        local user_host
+        user_host=$(grep "^${gh_user}	" "$GH_USER_PROFILES" | cut -d$'\t' -f5)
+        if [[ -n "$user_host" && "$user_host" != "github.com" ]]; then
+            gh_user_display="$gh_user ($user_host)"
+        fi
+    fi
+    echo "🔐 GitHub CLI user: $gh_user_display"
     
     # Display git config with validation
     if [[ "$config_source" == "none" ]]; then
@@ -2760,11 +2815,9 @@ cmd_status() {
         if [[ -n "$current_git_email" ]]; then
             while IFS= read -r username; do
                 if [[ -n "$username" ]]; then
-                    local profile
-                    { profile=$(profile_get "$username" 2>&1); } 2>/dev/null
-                    if [[ $? -eq 0 ]]; then
-                        local profile_email
-                        { profile_email=$(profile_get_field "$profile" "email" 2>&1); } 2>/dev/null
+                    local profile profile_email
+                    if profile=$(profile_get "$username" 2>/dev/null); then
+                        profile_email=$(profile_get_field "$profile" "email" 2>/dev/null) || profile_email=""
                         if [[ "$profile_email" == "$current_git_email" ]]; then
                             matches_profile=true
                             config_status="✅ "
@@ -2775,7 +2828,7 @@ cmd_status() {
             done < "$GH_USERS_CONFIG"
         fi
         
-        # Format name and email
+        # Format name and email with host info if available
         local config_display=""
         if [[ -n "$current_git_name" && -n "$current_git_email" ]]; then
             config_display="$current_git_name <$current_git_email>"
@@ -2787,7 +2840,22 @@ cmd_status() {
             config_display="<incomplete configuration>"
         fi
         
-        echo "📧 Git config: ${config_status}${config_display} ($config_source)"
+        # Add host info if we found a matching profile with non-default host
+        local host_info=""
+        # Simple host detection without complex logic to avoid debug output
+        if [[ -n "$current_git_email" && -f "$GH_USER_PROFILES" ]]; then
+            local host_line
+            host_line=$(grep -F "$current_git_email" "$GH_USER_PROFILES" 2>/dev/null | head -1)
+            if [[ -n "$host_line" ]]; then
+                local host_field
+                host_field=$(echo "$host_line" | cut -d$'\t' -f5 2>/dev/null)
+                if [[ -n "$host_field" && "$host_field" != "github.com" ]]; then
+                    host_info=" ($host_field)"
+                fi
+            fi
+        fi
+        
+        echo "📧 Git config: ${config_status}${config_display}${host_info} ($config_source)"
         
         if [[ "$matches_profile" == false ]]; then
             echo "   💡 Fix: ghs switch <user> to use a known profile"
@@ -2820,30 +2888,19 @@ cmd_status() {
             user_count=$((user_count + 1))
             local flags=""
             
-            # Check if this user is active (git config matches)
-            local profile
-            { profile=$(profile_get "$username" 2>&1); } 2>/dev/null
-            if [[ $? -eq 0 ]]; then
-                local profile_email
-                { profile_email=$(profile_get_field "$profile" "email" 2>&1); } 2>/dev/null
-                if [[ "$profile_email" == "$current_git_email" ]]; then
+            # Add SSH/HTTPS indicator using simple approach
+            if user_has_ssh_key "$username"; then
+                flags="$flags [SSH]"
+            else
+                flags="$flags [HTTPS]"
+            fi
+            
+            # Add active user marker using simple email matching
+            if [[ -n "$current_git_email" && -f "$GH_USER_PROFILES" ]]; then
+                local user_email
+                user_email=$(grep "^${username}	" "$GH_USER_PROFILES" 2>/dev/null | head -1 | cut -d$'\t' -f3)
+                if [[ "$user_email" == "$current_git_email" ]]; then
                     flags="$flags ► Active"
-                fi
-                
-                # Check SSH/HTTPS status
-                local ssh_key
-                { ssh_key=$(profile_get_field "$profile" "ssh_key" 2>&1); } 2>/dev/null
-                if [[ -n "$ssh_key" && -f "$ssh_key" ]]; then
-                    flags="$flags [SSH]"
-                else
-                    flags="$flags [HTTPS]"
-                fi
-                
-                # Check for host
-                local host
-                { host=$(profile_get_field "$profile" "host" 2>&1); } 2>/dev/null
-                if [[ -n "$host" && "$host" != "github.com" ]]; then
-                    flags="$flags ($host)"
                 fi
             fi
             
@@ -2888,10 +2945,9 @@ cmd_status() {
         local j=1
         while IFS= read -r other_user; do
             if [[ -n "$other_user" ]]; then
-                local other_profile
+                local other_profile other_email
                 if other_profile=$(profile_get "$other_user" 2>/dev/null); then
-                    local other_email
-                    other_email=$(profile_get_field "$other_profile" "email")
+                    other_email=$(profile_get_field "$other_profile" "email" 2>/dev/null) || other_email=""
                     if [[ "$other_email" != "$current_git_email" ]]; then
                         switch_num="$j"
                         switch_name="$other_user"
