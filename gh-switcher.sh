@@ -1827,16 +1827,31 @@ cmd_users() {
         return 0
     fi
     
+    # Get current git config to identify active user
+    local current_git_email
+    current_git_email=$(git config user.email 2>/dev/null || git config --global user.email 2>/dev/null)
+    
     echo "📋 Available users:"
     local i=1
     while IFS= read -r username; do
         if [[ -n "$username" ]]; then
             local profile_info=""
             local host_info=""
+            local active_marker=""
+            local dir_info=""
             
             # Get profile details
             local profile
             if profile=$(profile_get "$username" 2>/dev/null); then
+                # Check if this user is active
+                local profile_email
+                profile_email=$(profile_get_field "$profile" "email")
+                if [[ "$profile_email" == "$current_git_email" ]]; then
+                    active_marker="► "
+                else
+                    active_marker="  "
+                fi
+                
                 local host=$(profile_get_field "$profile" "host")
                 if [[ -n "$host" ]] && [[ "$host" != "github.com" ]]; then
                     host_info=" ($host)"
@@ -1847,9 +1862,24 @@ cmd_users() {
                 else
                     profile_info=" [HTTPS]"
                 fi
+            else
+                active_marker="  "
             fi
             
-            echo "  $i. $username$profile_info$host_info"
+            # Count assigned directories
+            if [[ -f "$GH_PROJECT_CONFIG" ]]; then
+                local dir_count
+                dir_count=$(grep -c "^[^|]*|${username}$" "$GH_PROJECT_CONFIG" 2>/dev/null || echo "0")
+                if [[ $dir_count -gt 0 ]]; then
+                    if [[ $dir_count -eq 1 ]]; then
+                        dir_info=" (1 dir)"
+                    else
+                        dir_info=" ($dir_count dirs)"
+                    fi
+                fi
+            fi
+            
+            echo "${active_marker}$i. $username$profile_info$host_info$dir_info"
             i=$((i + 1))
         fi
     done < "$GH_USERS_CONFIG"
@@ -2698,8 +2728,18 @@ cmd_status() {
     gh_user=$(gh api user -q .login 2>/dev/null) || gh_user="Not authenticated"
     
     # Get current git config
-    local current_git_email
-    current_git_email=$(git config user.email 2>/dev/null || git config --global user.email 2>/dev/null)
+    local current_git_email current_git_name config_source="none" matches_profile=false
+    
+    # Check local config first
+    if git config --local user.email >/dev/null 2>&1; then
+        current_git_email=$(git config --local user.email 2>/dev/null)
+        current_git_name=$(git config --local user.name 2>/dev/null)
+        config_source="local"
+    elif git config --global user.email >/dev/null 2>&1; then
+        current_git_email=$(git config --global user.email 2>/dev/null)
+        current_git_name=$(git config --global user.name 2>/dev/null)
+        config_source="global"
+    fi
     
     # Get assigned user for project
     local assigned_user=""
@@ -2708,9 +2748,67 @@ cmd_status() {
     # Display header
     echo "📍 Current project: $project"
     echo "🔐 GitHub CLI user: $gh_user"
+    
+    # Display git config with validation
+    if [[ "$config_source" == "none" ]]; then
+        echo "📧 Git config: ❌ Not configured"
+        echo "   💡 Fix: ghs switch <user> to set up git config"
+    else
+        # Check if current config matches any profile
+        local config_status="⚠️ "
+        local matches_profile=false
+        if [[ -n "$current_git_email" ]]; then
+            while IFS= read -r username; do
+                if [[ -n "$username" ]]; then
+                    local profile
+                    { profile=$(profile_get "$username" 2>&1); } 2>/dev/null
+                    if [[ $? -eq 0 ]]; then
+                        local profile_email
+                        { profile_email=$(profile_get_field "$profile" "email" 2>&1); } 2>/dev/null
+                        if [[ "$profile_email" == "$current_git_email" ]]; then
+                            matches_profile=true
+                            config_status="✅ "
+                            break
+                        fi
+                    fi
+                fi
+            done < "$GH_USERS_CONFIG"
+        fi
+        
+        # Format name and email
+        local config_display=""
+        if [[ -n "$current_git_name" && -n "$current_git_email" ]]; then
+            config_display="$current_git_name <$current_git_email>"
+        elif [[ -n "$current_git_email" ]]; then
+            config_display="<$current_git_email>"
+        elif [[ -n "$current_git_name" ]]; then
+            config_display="$current_git_name <no email set>"
+        else
+            config_display="<incomplete configuration>"
+        fi
+        
+        echo "📧 Git config: ${config_status}${config_display} ($config_source)"
+        
+        if [[ "$matches_profile" == false ]]; then
+            echo "   💡 Fix: ghs switch <user> to use a known profile"
+        fi
+    fi
+    
+    # Show additional status
     if auto_switch_enabled; then
         echo "🔄 Auto-switch: ENABLED"
     fi
+    
+    # Show guard hook status if in git repo
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        local hook_file=".git/hooks/pre-commit"
+        if [[ -f "$hook_file" ]] && grep -q "GHS_GUARD_HOOK" "$hook_file" 2>/dev/null; then
+            echo "🛡️  Guard hooks: INSTALLED"
+        else
+            echo "🛡️  Guard hooks: Not installed"
+        fi
+    fi
+    
     echo
     
     # Display users with flags
@@ -2724,16 +2822,26 @@ cmd_status() {
             
             # Check if this user is active (git config matches)
             local profile
-            if profile=$(profile_get "$username" 2>/dev/null); then
+            { profile=$(profile_get "$username" 2>&1); } 2>/dev/null
+            if [[ $? -eq 0 ]]; then
                 local profile_email
-                profile_email=$(profile_get_field "$profile" "email")
+                { profile_email=$(profile_get_field "$profile" "email" 2>&1); } 2>/dev/null
                 if [[ "$profile_email" == "$current_git_email" ]]; then
-                    flags="$flags <active>"
+                    flags="$flags ► Active"
+                fi
+                
+                # Check SSH/HTTPS status
+                local ssh_key
+                { ssh_key=$(profile_get_field "$profile" "ssh_key" 2>&1); } 2>/dev/null
+                if [[ -n "$ssh_key" && -f "$ssh_key" ]]; then
+                    flags="$flags [SSH]"
+                else
+                    flags="$flags [HTTPS]"
                 fi
                 
                 # Check for host
                 local host
-                host=$(profile_get_field "$profile" "host")
+                { host=$(profile_get_field "$profile" "host" 2>&1); } 2>/dev/null
                 if [[ -n "$host" && "$host" != "github.com" ]]; then
                     flags="$flags ($host)"
                 fi
@@ -2744,6 +2852,15 @@ cmd_status() {
                 flags="$flags <assigned>"
             fi
             
+            # Count assigned directories for this user
+            local dir_count=0
+            if [[ -f "$GH_PROJECT_CONFIG" ]]; then
+                dir_count=$(grep -c "^[^|]*|${username}$" "$GH_PROJECT_CONFIG" 2>/dev/null || echo "0")
+                if [[ $dir_count -gt 0 ]]; then
+                    flags="$flags <$dir_count dirs>"
+                fi
+            fi
+            
             printf "  %d. %-20s%s\n" "$i" "$username" "$flags"
             i=$((i + 1))
         fi
@@ -2752,10 +2869,22 @@ cmd_status() {
     echo
     echo "⚡ Quick actions:"
     
-    # Show contextual switch suggestion (don't suggest current active user)
-    if [[ $user_count -gt 1 ]]; then
-        # Find a user that isn't currently active
-        local switch_suggestion=""
+    local actions_shown=0
+    
+    # Priority 1: Fix config issues
+    if [[ "$config_source" == "none" ]] && [[ $user_count -gt 0 ]]; then
+        echo "  ghs switch 1         # Set up git config"
+        actions_shown=$((actions_shown + 1))
+    elif [[ "$matches_profile" == false ]] && [[ $user_count -gt 0 ]]; then
+        echo "  ghs switch 1         # Fix unknown git config"
+        actions_shown=$((actions_shown + 1))
+    fi
+    
+    # Priority 2: Show contextual switch suggestion
+    if [[ $user_count -gt 1 ]] && [[ "$matches_profile" == true ]]; then
+        # Find a user that isn't currently active and show their name
+        local switch_num=""
+        local switch_name=""
         local j=1
         while IFS= read -r other_user; do
             if [[ -n "$other_user" ]]; then
@@ -2764,7 +2893,8 @@ cmd_status() {
                     local other_email
                     other_email=$(profile_get_field "$other_profile" "email")
                     if [[ "$other_email" != "$current_git_email" ]]; then
-                        switch_suggestion="$j"
+                        switch_num="$j"
+                        switch_name="$other_user"
                         break
                     fi
                 fi
@@ -2772,29 +2902,39 @@ cmd_status() {
             fi
         done < "$GH_USERS_CONFIG"
         
-        if [[ -n "$switch_suggestion" ]]; then
-            echo "  ghs switch $switch_suggestion        # Switch to different account"
+        if [[ -n "$switch_num" ]] && [[ $actions_shown -lt 3 ]]; then
+            printf "  ghs switch %-9s # Switch to %s\n" "$switch_num" "$switch_name"
+            actions_shown=$((actions_shown + 1))
         fi
-    elif [[ $user_count -eq 1 ]]; then
-        echo "  ghs add current     # Add another GitHub account"
     fi
     
-    # Show assign command if in a git repo and no assignment
-    if git rev-parse --git-dir >/dev/null 2>&1 && [[ $user_count -gt 0 ]] && [[ -z "$assigned_user" ]]; then
-        echo "  ghs assign <1-$user_count>    # Always use account X in this directory"
-    fi
-    
-    # Show guard install only if in git repo and guards not installed
-    if git rev-parse --git-dir >/dev/null 2>&1; then
+    # Priority 3: Guard install if in git repo and not installed
+    if git rev-parse --git-dir >/dev/null 2>&1 && [[ $actions_shown -lt 3 ]]; then
         local hook_file=".git/hooks/pre-commit"
         if [[ ! -f "$hook_file" ]] || ! grep -q "GHS_GUARD_HOOK" "$hook_file" 2>/dev/null; then
-            echo "  ghs guard install   # Protect this repo from wrong-account commits"
+            echo "  ghs guard install    # Protect from wrong-account commits"
+            actions_shown=$((actions_shown + 1))
         fi
     fi
     
-    echo "  ghs help            # Show all commands"
-    echo
-    echo "Type 'ghs help' for all commands"
+    # Priority 4: Assign command if in git repo with no assignment
+    if git rev-parse --git-dir >/dev/null 2>&1 && [[ $user_count -gt 0 ]] && [[ -z "$assigned_user" ]] && [[ $actions_shown -lt 3 ]]; then
+        if [[ $user_count -eq 1 ]]; then
+            echo "  ghs assign 1         # Always use this account here"
+        else
+            echo "  ghs assign <user>    # Always use specific account here"
+        fi
+        actions_shown=$((actions_shown + 1))
+    fi
+    
+    # Priority 5: Add user if only one exists
+    if [[ $user_count -eq 1 ]] && [[ $actions_shown -lt 3 ]]; then
+        echo "  ghs add current      # Add another GitHub account"
+        actions_shown=$((actions_shown + 1))
+    fi
+    
+    # Always show help as last option
+    echo "  ghs help             # Show all commands"
     
     return 0
 }
