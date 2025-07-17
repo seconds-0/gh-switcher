@@ -88,7 +88,6 @@ teardown() {
 
 # Test 3: VS Code Bash - Git operations work with VS Code's Git environment
 @test "e2e: VS Code bash - git config updates work" {
-    skip "Test hangs in CI environment - investigating"
     local script_path="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/gh-switcher.sh"
     
     run bash -c "
@@ -110,8 +109,8 @@ teardown() {
         # Add user first
         ghs add gituser >/dev/null 2>&1
         
-        # Update the profile with our test data
-        ghs edit gituser --name 'Git User' --email 'git@vscode.test' >/dev/null 2>&1
+        # Create profile for the user (needed for git config)
+        printf 'gituser\tGit User\tgit@vscode.test\t\tgithub.com\n' > \"$GH_USER_PROFILES\"
         
         # Switch to user - this should apply the profile
         ghs switch gituser >/dev/null 2>&1
