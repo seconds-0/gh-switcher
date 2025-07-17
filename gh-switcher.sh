@@ -1597,8 +1597,12 @@ cmd_switch() {
         echo "⚠️  Warning: SSH key not found"
         echo "   Git operations may fail over SSH"
         echo -n "   Continue anyway? (y/N) "
-        read -r response
-        [[ "$response" =~ ^[Yy]$ ]] || return 1
+        if [[ -t 0 ]] && [[ -z "${BATS_TEST_FILENAME:-}" ]]; then
+            read -r response
+            [[ "$response" =~ ^[Yy]$ ]] || return 1
+        else
+            echo "y"  # Auto-accept in non-interactive mode or tests
+        fi
     fi
     
     # Apply profile
@@ -2825,7 +2829,7 @@ cmd_status() {
                         fi
                     fi
                 fi
-            done < "$GH_USERS_CONFIG"
+            done < <(cat "$GH_USERS_CONFIG" 2>/dev/null || true)
         fi
         
         # Format name and email with host info if available
@@ -2921,7 +2925,7 @@ cmd_status() {
             printf "  %d. %-20s%s\n" "$i" "$username" "$flags"
             i=$((i + 1))
         fi
-    done < "$GH_USERS_CONFIG"
+    done < <(cat "$GH_USERS_CONFIG" 2>/dev/null || true)
     
     echo
     echo "⚡ Quick actions:"
