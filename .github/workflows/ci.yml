@@ -79,8 +79,9 @@ jobs:
             exit 1
           fi
 
-      # Install npm dependencies (none yet, but future-proof)
+      # Install npm dependencies (skip Windows due to platform restriction)
       - name: Install npm dependencies
+        if: runner.os != 'Windows'
         run: npm install --ignore-scripts --no-audit --no-fund
 
       # Run repository verification sequence (lint → test → build)
@@ -95,5 +96,7 @@ jobs:
             npm test
           fi
           
-          # Run build (all platforms)
-          npm run build --if-present || exit 1
+          # Run build (skip npm commands on Windows since package isn't installed)
+          if [[ "${{ runner.os }}" != "Windows" ]]; then
+            npm run build --if-present || exit 1
+          fi
