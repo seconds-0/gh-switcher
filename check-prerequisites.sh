@@ -9,14 +9,22 @@ check_command() {
     local min_version=$2
     local install_url=$3
     
+    # Validate command parameter to prevent injection
+    if [[ ! "$cmd" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "❌ Invalid command name: $cmd"
+        return 1
+    fi
+    
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "❌ $cmd is required but not installed"
         echo "   Install from: $install_url"
         return 1
     else
-        echo "✅ $cmd found: $(command -v $cmd)"
+        echo "✅ $cmd found: $(command -v "$cmd")"
         if [[ -n "$min_version" ]]; then
-            local version=$($cmd --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            # Use safer version extraction
+            local version
+            version=$(command "$cmd" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
             echo "   Version: $version (minimum: $min_version)"
         fi
     fi
@@ -36,8 +44,18 @@ check_command git "" "https://git-scm.com/"
 
 # Check for json package (used in many commands)
 if ! npx json --version >/dev/null 2>&1; then
-    echo "⚠️  json package not found globally, installing..."
-    npm install -g json
+    echo "⚠️  json package not found globally"
+    echo "   Would you like to install it? (y/N)"
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        echo "Installing json package globally..."
+        npm install -g json
+        echo "✅ json package installed"
+    else
+        echo "⚠️  json package not installed - some commands may not work"
+    fi
+else
+    echo "✅ json package available"
 fi
 
 # Check Docker (optional but recommended)

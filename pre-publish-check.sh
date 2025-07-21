@@ -47,7 +47,21 @@ for field in name version description author license; do
     fi
 done
 
-echo "8️⃣ Verify npm authentication..."
+echo "8️⃣ Run security audit..."
+echo "Running npm audit to check for vulnerabilities..."
+if npm audit --audit-level=moderate; then
+    echo "✅ No security vulnerabilities found"
+else
+    echo "⚠️  Security vulnerabilities detected. Consider running 'npm audit fix'"
+    echo "   Continue anyway? (y/N)"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo "❌ Publish aborted due to security concerns"
+        exit 1
+    fi
+fi
+
+echo "9️⃣ Verify npm authentication..."
 if ! npm whoami >/dev/null 2>&1; then
     echo "❌ Not logged into npm. Run 'npm login' first"
     exit 1
@@ -57,4 +71,4 @@ echo ""
 echo "✅ All pre-publish checks passed!"
 echo "📦 Package ready for: npm publish"
 echo ""
-echo "⚠️  IMPORTANT: Remember the known bug in CHANGELOG.md before publishing"
+echo "✅ Package ready for release!"

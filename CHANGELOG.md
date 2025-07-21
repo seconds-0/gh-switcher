@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Known Issues
 - Windows support requires Git Bash or WSL
 - Fish shell users may need to use bash wrapper
-- BUG: `ghs remove 1` crashes terminal in zsh/vscode (to be fixed before release)
+
+### Fixed Issues
+- ✅ Fixed: `ghs remove 1` crashes terminal in zsh/vscode (whitespace in arithmetic comparisons)
 
 [0.1.0]: https://github.com/seconds-0/gh-switcher/releases/tag/v0.1.0
