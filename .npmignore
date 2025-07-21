@@ -1,0 +1,24 @@
+# Test files
+test/
+*.test.sh
+bats/
+
+# Documentation
+Documentation/
+*.md
+!README.md
+
+# Development files
+.github/
+.gitignore
+.npmignore
+pre-publish-check.sh
+check-prerequisites.sh
+
+# OS files
+.DS_Store
+*.swp
+
+# Logs
+*.log
+npm-debug.log*

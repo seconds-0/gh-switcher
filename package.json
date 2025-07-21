@@ -1,11 +1,16 @@
 {
   "name": "gh-switcher",
-  "version": "1.0.0",
-  "description": "🎯 Lightweight GitHub account switcher with numbered users and project memory",
+  "version": "0.1.0",
+  "description": "Lightning-fast GitHub account switcher for developers with multiple identities",
   "main": "gh-switcher.sh",
   "bin": {
-    "gh-switcher": "./gh-switcher.sh"
+    "ghs": "./gh-switcher.sh"
   },
+  "files": [
+    "gh-switcher.sh",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "lint": "shellcheck -x -e SC1091,SC2155,SC2181 gh-switcher.sh",
     "test": "bats -r tests",
@@ -25,15 +30,19 @@
   },
   "keywords": [
     "github",
-    "git",
-    "account",
-    "switcher",
     "cli",
+    "git",
+    "account-switcher",
+    "ssh",
     "developer-tools",
-    "productivity",
-    "project-management"
+    "github-cli",
+    "multi-account"
   ],
-  "author": "seconds-0",
+  "author": {
+    "name": "seconds-0",
+    "email": "seconds0.005@gmail.com",
+    "url": "https://github.com/seconds-0"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -50,6 +59,6 @@
   "os": [
     "darwin",
     "linux",
-    "win32"
+    "!win32"
   ]
 }
