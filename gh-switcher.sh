@@ -8,6 +8,12 @@
 # - Single responsibility per function  
 # - Clear separation of concerns
 # - Simple over complex
+
+# Handle zsh compatibility
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+    # Prevent variable assignment output in command substitution
+    setopt LOCAL_OPTIONS NO_VERBOSE 2>/dev/null || true
+fi
 #
 # Error Message Style Guide:
 # - ❌ = Hard errors that stop execution
@@ -447,7 +453,7 @@ user_get_by_id() {
     
     # Validate ID is within bounds
     local total_users
-    total_users=$(wc -l < "$GH_USERS_CONFIG")
+    total_users=$(wc -l < "$GH_USERS_CONFIG" | tr -d ' ')
     if [[ "$user_id" -lt 1 ]] || [[ "$user_id" -gt "$total_users" ]]; then
         echo "User ID $user_id out of range (1-$total_users)" >&2
         return 1
@@ -459,7 +465,7 @@ user_get_by_id() {
 # Count total users
 user_count() {
     if [[ -f "$GH_USERS_CONFIG" ]]; then
-        wc -l < "$GH_USERS_CONFIG"
+        wc -l < "$GH_USERS_CONFIG" | tr -d ' '
     else
         echo "0"
     fi
@@ -1905,9 +1911,8 @@ cmd_users() {
             
             # Count assigned directories
             if [[ -f "$GH_PROJECT_CONFIG" ]]; then
-                local dir_count
                 # Ensure dir_count is a clean numeric value (handle potential multiple lines from grep)
-                dir_count=$(grep -c "^[^|]*|${username}$" "$GH_PROJECT_CONFIG" 2>/dev/null || echo "0")
+                local dir_count=$(grep -c "^[^|]*|${username}$" "$GH_PROJECT_CONFIG" 2>/dev/null || echo "0")
                 dir_count="${dir_count//[^0-9]/}"  # Remove any non-numeric characters
                 [[ -z "$dir_count" ]] && dir_count=0
                 if [[ $dir_count -gt 0 ]]; then
@@ -3358,6 +3363,16 @@ if [[ -n "${BASH_VERSION:-}" ]]; then
 fi
 
 # If script is executed directly, run with all arguments
-if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" ]]; then
-    ghs "$@"
+# Handle both bash and zsh
+if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    # Bash: check if sourced
+    if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        ghs "$@"
+    fi
+elif [[ -n "${ZSH_VERSION:-}" ]]; then
+    # Zsh: check if sourced using zsh_eval_context
+    # shellcheck disable=SC2154
+    if [[ ! " ${zsh_eval_context[*]} " =~ " file " ]]; then
+        ghs "$@"
+    fi
 fi
