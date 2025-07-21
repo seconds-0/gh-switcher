@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "lint": "shellcheck -x -e SC1091,SC2155,SC2181 gh-switcher.sh",
-    "test": "bats -r tests",
+    "test": "CI=true bats -r tests",
     "test:unit": "bats -r tests/unit",
     "test:integration": "bats -r tests/integration",
     "test:e2e": "bats -r tests/e2e",
