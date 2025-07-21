@@ -1,5 +1,9 @@
 # 🎯 GitHub Project Switcher (gh-switcher)
 
+[![npm version](https://img.shields.io/npm/v/gh-switcher)](https://www.npmjs.com/package/gh-switcher)
+[![npm downloads](https://img.shields.io/npm/dm/gh-switcher)](https://www.npmjs.com/package/gh-switcher)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Lightweight, secure GitHub account switcher for the command line. Manage multiple GitHub accounts (personal, work, client) with project-specific memory and numbered user references for easy switching.
 
 ## Features
@@ -13,30 +17,45 @@ Lightweight, secure GitHub account switcher for the command line. Manage multipl
 
 ## Installation
 
-### Quick Install
+### Via npm (Recommended)
+```bash
+npm install -g gh-switcher
+```
+
+After installation, the `ghs` command will be available globally.
+
+### Prerequisites
+Before installing gh-switcher, ensure you have:
+- **Node.js** (v14 or higher) - [Installation guide](https://nodejs.org/)
+- **Git** - [Installation guide](https://git-scm.com/downloads)
+- **GitHub CLI** (`gh`) - [Installation guide](https://cli.github.com/manual/installation)
+
+Verify prerequisites:
+```bash
+node --version   # Should show v14.0.0 or higher
+git --version    # Should show git version
+gh --version     # Should show gh version
+```
+
+### Platform Support
+- ✅ **macOS**: Full support
+- ✅ **Linux**: Full support  
+- ⚠️  **Windows**: Requires Git Bash or WSL (not native CMD/PowerShell)
+
+### Manual Installation
 
 For **Bash/Zsh** users:
 ```bash
 # Download and make executable
-curl -o gh-switcher.sh https://raw.githubusercontent.com/user/repo/main/gh-switcher.sh
+curl -o gh-switcher.sh https://raw.githubusercontent.com/seconds-0/gh-switcher/main/gh-switcher.sh
 chmod +x gh-switcher.sh
 
-# Install to your shell profile
-./gh-switcher.sh install
+# Add to your shell profile
+echo "source $(pwd)/gh-switcher.sh" >> ~/.zshrc  # or ~/.bashrc
+source ~/.zshrc  # or source ~/.bashrc
 ```
 
 For **Fish** users: Run `ghs fish-setup` after installation, or see [Fish Setup Guide](docs/FISH_SETUP.md).
-
-### Manual Install
-
-**Bash/Zsh:**
-```bash
-# Add to your shell profile
-echo "source $(pwd)/gh-switcher.sh" >> ~/.zshrc
-source ~/.zshrc
-```
-
-**Fish:** Requires a wrapper function - see [Fish Setup Guide](docs/FISH_SETUP.md).
 
 ## Quick Start
 
@@ -187,6 +206,52 @@ for project in project1 project2 project3; do
   ghs assign work-account
   git push
 done
+```
+
+## Troubleshooting
+
+### npm Installation Issues
+
+**Permission denied (EACCES) during global install**:
+```bash
+# Option 1: Configure npm to use a different directory (recommended)
+mkdir ~/.npm-global
+npm config set prefix '~/.npm-global'
+echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.zshrc  # or ~/.bashrc
+source ~/.zshrc  # or source ~/.bashrc
+npm install -g gh-switcher
+```
+
+**Command not found after installation**:
+```bash
+# Check npm global bin location
+npm config get prefix
+# Add to PATH if needed
+export PATH="$(npm config get prefix)/bin:$PATH"
+```
+
+**Existing command conflicts**:
+```bash
+# Check if ghs already exists
+which ghs
+# If it exists, uninstall conflicting package first
+```
+
+**Windows-specific issues**:
+- Must use Git Bash or WSL, not Command Prompt or PowerShell
+- Git Bash minimum version: 2.32.0
+- Run `npm install -g gh-switcher --force` if symlink issues occur
+
+**npm Registry Issues**:
+- Timeout errors: `npm config set registry https://registry.npmjs.org/`
+- Corporate proxy: See npm docs for proxy configuration
+- Use `npm install -g gh-switcher --verbose` for detailed error logs
+
+**Verify installation**:
+```bash
+npm list -g gh-switcher  # Should show the package
+which ghs                # Should show path to command
+ghs --version           # Should show version
 ```
 
 ## Contributing
