@@ -96,16 +96,16 @@ load 'helpers/e2e_helper'
         send \"source $script_path\r\"
         expect {> }
         
-        # In zsh, errexit is called 'err_exit'
+        # In zsh, strict mode sets 'errexit' option
         # Check if it's set (grep returns 1 if not found)
-        send \"setopt | grep -i err_exit || echo 'NO_ERREXIT'\r\"
+        send \"setopt | grep -i errexit || echo 'NO_ERREXIT'\r\"
         expect {
             \"NO_ERREXIT\" {
-                # Good - no error exit set
+                # Good - no errexit set
                 expect -re {[%$>] ?$}
             }
-            -re {err_exit} {
-                puts \"FAIL: err_exit set when sourced - would crash user shells!\"
+            -re {errexit} {
+                puts \"FAIL: errexit set when sourced - would crash user shells!\"
                 exit 1
             }
             timeout {
