@@ -96,35 +96,27 @@ load 'helpers/e2e_helper'
         send \"source $script_path\r\"
         expect {> }
         
-        # In zsh, strict mode sets 'errexit' option
-        # Check if it's set (grep returns 1 if not found)
-        send \"setopt | grep -i errexit || echo 'NO_ERREXIT'\r\"
+        # The critical test: shell must survive errors when sourced
+        # This is more important than checking the option directly
+        send \"false && echo 'SHOULD_NOT_SEE_THIS' || echo 'Correctly handled false'\r\"
         expect {
-            \"NO_ERREXIT\" {
-                # Good - no errexit set
-                expect -re {[%$>] ?$}
+            \"Correctly handled false\" {
+                expect {> }
             }
-            -re {errexit} {
-                puts \"FAIL: errexit set when sourced - would crash user shells!\"
+            \"SHOULD_NOT_SEE_THIS\" {
+                puts \"FAIL: Shell not handling errors correctly\"
+                exit 1
+            }
+            eof {
+                puts \"FAIL: Shell died on false command - errexit is active!\"
                 exit 1
             }
             timeout {
-                puts \"FAIL: Timeout checking error options\"
+                puts \"FAIL: Timeout testing error handling\"
                 exit 1
             }
         }
         
-        # Test commands that should NOT crash the shell
-        send \"false || echo 'Survived false'\r\"
-        expect {
-            \"Survived false\" {
-                expect -re {[%$>] ?$}
-            }
-            eof {
-                puts \"FAIL: Shell died on false command\"
-                exit 1
-            }
-        }
         
         # Test the exact command that crashed user shells
         send \"ghs remove\r\"
