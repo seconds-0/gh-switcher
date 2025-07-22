@@ -97,22 +97,34 @@ load 'helpers/e2e_helper'
         expect {> }
         
         # The critical test: shell must survive errors when sourced
-        # This is more important than checking the option directly
-        send \"false && echo 'SHOULD_NOT_SEE_THIS' || echo 'Correctly handled false'\r\"
+        # First, let's check if the shell is still alive after a failing command
+        send \"false\r\"
         expect {
-            \"Correctly handled false\" {
-                expect {> }
-            }
-            \"SHOULD_NOT_SEE_THIS\" {
-                puts \"FAIL: Shell not handling errors correctly\"
-                exit 1
+            {> } {
+                # Good, we got a prompt back, shell survived
             }
             eof {
-                puts \"FAIL: Shell died on false command - errexit is active!\"
+                puts \"FAIL: Shell died after 'false' - errexit is active!\"
                 exit 1
             }
             timeout {
-                puts \"FAIL: Timeout testing error handling\"
+                puts \"FAIL: Timeout after 'false' command\"
+                exit 1
+            }
+        }
+        
+        # Now verify we can still run commands
+        send \"echo 'Shell survived error'\r\"
+        expect {
+            \"Shell survived error\" {
+                expect {> }
+            }
+            eof {
+                puts \"FAIL: Shell died - cannot execute after error\"
+                exit 1
+            }
+            timeout {
+                puts \"FAIL: Timeout checking shell survival\"
                 exit 1
             }
         }
