@@ -240,9 +240,9 @@ EOF\r\"
         expect -re {[$#] ?$}
         
         # VS Code environment shouldn't cause crashes
-        send \"ghs status 2>&1 | head -n1\r\"
+        send \"ghs users\r\"
         expect {
-            -re {(Current project|GitHub CLI user|No users configured)} {
+            -re {(No users configured|Available users)} {
                 expect -re {[$#] ?$}
             }
             timeout {
