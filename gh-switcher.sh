@@ -22,8 +22,24 @@ fi
 # - 💡 = Helpful tips
 # - ✅ = Success confirmations
 
-# Enable strict mode but allow it to be disabled for testing
-[[ "${GHS_STRICT_MODE:-true}" == "true" ]] && set -euo pipefail
+# Enable strict mode only when script is executed directly, not sourced
+# When sourced, -e would cause the user's shell to exit on any error
+if [[ "${GHS_STRICT_MODE:-true}" == "true" ]]; then
+    # Check if script is being executed (not sourced)
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        # Bash: check BASH_SOURCE
+        if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+            set -euo pipefail
+        fi
+    elif [[ -n "${ZSH_VERSION:-}" ]]; then
+        # Zsh: check if sourced using zsh_eval_context
+        # shellcheck disable=SC2154
+        if [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]]; then
+            # Not being sourced, safe to set strict mode
+            set -euo pipefail
+        fi
+    fi
+fi
 
 # Handle VSCode shell integration variables to prevent unset variable errors
 : "${VSCODE_SHELL_ENV_REPORTING:=}"
