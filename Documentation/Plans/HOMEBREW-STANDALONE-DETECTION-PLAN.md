@@ -25,54 +25,28 @@ When gh-switcher is installed via Homebrew or npm globally, it runs as a standal
 Add after configuration section (~line 100 in gh-switcher.sh):
 
 ```bash
-# Detect if running as standalone executable vs sourced
-# Returns 0 if standalone (Homebrew/npm), 1 if sourced
-is_standalone_executable() {
-    local reason=""
-    
-    # Method 1: Check if being executed directly (Bash)
-    if [[ -n "${BASH_VERSION:-}" ]] && [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-        reason="bash-direct-execution"
-        [[ "${DEBUG:-}" == "true" ]] && echo "[DEBUG] Standalone detected: $reason" >&2
-        return 0
+# Check if running as standalone executable (not sourced)
+is_standalone() {
+    # Bash: direct execution check
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        [[ "${BASH_SOURCE[0]}" == "${0}" ]] && return 0
+        return 1
     fi
     
-    # Method 2: Check zsh context
-    if [[ -n "${ZSH_VERSION:-}" ]] && [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]]; then
-        reason="zsh-no-file-context"
-        [[ "${DEBUG:-}" == "true" ]] && echo "[DEBUG] Standalone detected: $reason" >&2
-        return 0
+    # Zsh: use eval context consistently with rest of codebase
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        # When sourced, zsh_eval_context contains "file"
+        # When executed, it contains "toplevel" or is empty
+        [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]] && return 0
+        return 1
     fi
     
-    # Method 3: Process name check
-    if [[ "$(basename "$0" 2>/dev/null)" == "ghs" ]]; then
-        reason="process-name-ghs"
-        [[ "${DEBUG:-}" == "true" ]] && echo "[DEBUG] Standalone detected: $reason" >&2
-        return 0
-    fi
-    
-    # Method 4: Homebrew path check (macOS and Linux)
-    local script_path="$(readlink -f "$0" 2>/dev/null || echo "$0")"
-    if [[ "$script_path" =~ ^(/opt/homebrew|/usr/local|/home/linuxbrew/.linuxbrew)/bin/ghs$ ]]; then
-        reason="homebrew-path"
-        [[ "${DEBUG:-}" == "true" ]] && echo "[DEBUG] Standalone detected: $reason" >&2
-        return 0
-    fi
-    
-    # Method 5: NPM global installation check
-    if [[ "$script_path" =~ /npm-global/bin/ghs$ ]] || [[ "$script_path" =~ /.npm/bin/ghs$ ]]; then
-        reason="npm-global-path"
-        [[ "${DEBUG:-}" == "true" ]] && echo "[DEBUG] Standalone detected: $reason" >&2
-        return 0
-    fi
-    
-    [[ "${DEBUG:-}" == "true" ]] && echo "[DEBUG] Sourced mode detected" >&2
     return 1
 }
 
 # Get installation method for user-friendly messages
 get_installation_method() {
-    if ! is_standalone_executable; then
+    if ! is_standalone; then
         echo "shell-sourced"
         return
     fi
@@ -127,7 +101,7 @@ COMMANDS:
 EOF
 
     # Only show these commands when sourced
-    if ! is_standalone_executable; then
+    if ! is_standalone; then
         cat << 'EOF'
   auto-switch         Automatic profile switching by directory
   fish-setup          Set up gh-switcher for Fish shell
@@ -153,7 +127,7 @@ EXAMPLES:
 EOF
 
     # Only show auto-switch examples when sourced
-    if ! is_standalone_executable; then
+    if ! is_standalone; then
         cat << 'EOF'
 
 AUTO-SWITCHING:
@@ -164,7 +138,7 @@ EOF
     fi
 
     # Add note about installation mode
-    if is_standalone_executable; then
+    if is_standalone; then
         cat << 'EOF'
 
 NOTE: Running in standalone mode (Homebrew installation).
@@ -180,7 +154,7 @@ EOF
 #### Auto-switch Command
 ```bash
 cmd_auto_switch() {
-    if is_standalone_executable; then
+    if is_standalone; then
         local install_method=$(get_installation_method)
         local uninstall_cmd=""
         
@@ -223,7 +197,7 @@ EOF
 #### Fish Setup Command
 ```bash
 cmd_fish_setup() {
-    if is_standalone_executable; then
+    if is_standalone; then
         cat << 'EOF'
 ❌ Fish setup requires shell integration
 
@@ -251,7 +225,7 @@ cmd_status() {
     
     # Add installation mode info at the end
     echo ""
-    if is_standalone_executable; then
+    if is_standalone; then
         local install_method=$(get_installation_method)
         echo "📦 Installation: ${install_method} (standalone mode)"
         echo "   Limited features: auto-switch, fish-setup"
@@ -272,7 +246,7 @@ cmd_doctor() {
     
     echo ""
     echo "📦 Installation Details:"
-    if is_standalone_executable; then
+    if is_standalone; then
         local install_method=$(get_installation_method)
         echo "   Type: ${install_method}"
         echo "   Mode: Standalone executable"
@@ -300,7 +274,7 @@ cmd_version() {
     local version="${GHS_VERSION:-0.1.0}"
     echo "gh-switcher v${version}"
     
-    if is_standalone_executable; then
+    if is_standalone; then
         local install_method=$(get_installation_method)
         echo "Installation: ${install_method} (standalone)"
     else
@@ -327,7 +301,7 @@ ghs() {
     init_config
     
     # First-run detection for standalone installations
-    if [[ ! -f ~/.gh-switcher-welcomed ]] && is_standalone_executable; then
+    if [[ ! -f ~/.gh-switcher-welcomed ]] && is_standalone; then
         echo "ℹ️  Running gh-switcher in standalone mode (some features limited)"
         echo "   Run 'ghs help' to see available commands"
         touch ~/.gh-switcher-welcomed
@@ -539,7 +513,7 @@ Create new test file `test/standalone-detection.bats`:
 load test_helper
 
 @test "detection: sourced script detected correctly" {
-    run bash -c "source $GHS_PATH && is_standalone_executable"
+    run bash -c "source $GHS_PATH && is_standalone"
     assert_failure
 }
 
@@ -668,7 +642,7 @@ Go with the detection and hiding approach because:
 ## Implementation Checklist
 
 ### Code Changes
-- [ ] Add `is_standalone_executable()` function
+- [ ] Add `is_standalone()` function
 - [ ] Add `get_installation_method()` function  
 - [ ] Update `cmd_help()` to conditionally show commands
 - [ ] Update `cmd_auto_switch()` with helpful error message

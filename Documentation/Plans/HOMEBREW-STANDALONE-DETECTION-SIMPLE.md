@@ -15,10 +15,18 @@ After configuration section in `gh-switcher.sh`:
 # Check if running as standalone executable (not sourced)
 is_standalone() {
     # Bash: direct execution check
-    [[ -n "${BASH_VERSION:-}" ]] && [[ "${BASH_SOURCE[0]}" == "${0}" ]] && return 0
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        [[ "${BASH_SOURCE[0]}" == "${0}" ]] && return 0
+        return 1
+    fi
     
-    # Zsh: context check  
-    [[ -n "${ZSH_VERSION:-}" ]] && [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]] && return 0
+    # Zsh: use eval context consistently with rest of codebase
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        # When sourced, zsh_eval_context contains "file"
+        # When executed, it contains "toplevel" or is empty
+        [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]] && return 0
+        return 1
+    fi
     
     return 1
 }

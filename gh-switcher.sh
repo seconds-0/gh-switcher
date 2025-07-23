@@ -88,21 +88,19 @@ init_config() {
 
 # Check if running as standalone executable (not sourced)
 is_standalone() {
-    # If we're being called from within the ghs function, check how script was invoked
-    # When sourced: script defines functions in current shell
-    # When executed: script runs in subprocess
-    
     # Bash: direct execution check
     if [[ -n "${BASH_VERSION:-}" ]]; then
         [[ "${BASH_SOURCE[0]}" == "${0}" ]] && return 0
         return 1
     fi
     
-    # Zsh: Check if script name matches program name
+    # Zsh: use eval context consistently with rest of codebase
     if [[ -n "${ZSH_VERSION:-}" ]]; then
-        # When executed directly, $0 will be the script path
-        # When sourced, $0 will be the shell name (zsh, -zsh, etc.)
-        [[ "$0" =~ gh-switcher\.sh ]] && return 0
+        # Debug: uncomment for troubleshooting
+        # echo "[DEBUG] zsh_eval_context: '${zsh_eval_context[*]:-empty}'" >&2
+        # When sourced, zsh_eval_context contains "file"
+        # When executed, it contains "toplevel" or is empty
+        [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]] && return 0
         return 1
     fi
     
