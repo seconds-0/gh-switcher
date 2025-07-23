@@ -103,14 +103,17 @@ ghs                                               # Check current status anytime
 ### Account Management  
 - `ghs add <name>` - Add new account (`current` for active gh user)
 - `ghs remove <number|name>` - Remove account
-- `ghs update <user> <field> <value>` - Update account details
+- `ghs edit <user>` - Update email, SSH key, or host settings
+- `ghs show <user>` - View account details and diagnose issues
 
 ### Advanced Features
 - `ghs guard install` - Install pre-commit hook (prevents wrong account commits)
 - `ghs guard uninstall` - Remove pre-commit hook
+- `ghs guard test` - Test guard validation without committing
 - `ghs auto-switch enable` - Auto-switch accounts by directory
 - `ghs auto-switch disable` - Turn off auto-switching
-- `ghs validate` - Check SSH keys and configuration
+- `ghs test-ssh [<user>]` - Verify SSH key works with GitHub
+- `ghs doctor` - Show diagnostics for troubleshooting
 
 Run `ghs help` for complete command reference.
 

@@ -4,7 +4,7 @@
   "description": "Lightning-fast GitHub account switcher for developers with multiple identities",
   "main": "gh-switcher.sh",
   "bin": {
-    "ghs": "./gh-switcher.sh"
+    "ghs": "gh-switcher.sh"
   },
   "files": [
     "gh-switcher.sh",
@@ -26,7 +26,12 @@
     "uninstall-hook": "bash gh-switcher.sh guard uninstall",
     "install-dev-hooks": "./scripts/install-dev-hooks.sh",
     "precommit": "npm run lint && npm test",
-    "shell-reset": "./scripts/shell-reset.sh"
+    "shell-reset": "./scripts/shell-reset.sh",
+    "prepublishOnly": "npm run ci-check",
+    "release:patch": "npm version patch && git push --follow-tags",
+    "release:minor": "npm version minor && git push --follow-tags",
+    "release:major": "npm version major && git push --follow-tags",
+    "release:dry-run": "npm pack --dry-run"
   },
   "keywords": [
     "github",
@@ -46,7 +51,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/seconds-0/gh-switcher.git"
+    "url": "git+https://github.com/seconds-0/gh-switcher.git"
   },
   "bugs": {
     "url": "https://github.com/seconds-0/gh-switcher/issues"

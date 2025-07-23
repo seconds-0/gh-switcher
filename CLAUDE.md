@@ -283,3 +283,41 @@ unset VARIABLE && bash -euo pipefail -c 'source ./script.sh && command'
 - **Always strip whitespace from `wc` output**: Use `wc -l < file | tr -d ' '`
   - `wc` outputs with leading spaces that can crash zsh in arithmetic comparisons
   - This pattern prevents `[[ 999 -gt "    1" ]]` type failures
+
+## Git Branch Management & NPM Release Process
+
+### Branch Strategy
+```
+main (production)     → What's published on npm
+├── develop          → Integration branch for next release
+├── feature/*        → New features (PR → develop)
+├── fix/*           → Bug fixes (PR → develop)
+├── release/v*      → Release prep (PR → main)
+└── hotfix/*        → Emergency fixes (PR → main + develop)
+```
+
+### Release Process (ALWAYS follow this)
+1. **Feature Development**: Work in `feature/*` or `fix/*` branches, PR to `develop`
+2. **Release Prep**: Create `release/v*` from `develop`, final testing
+3. **Publish**: Merge to `main`, then `npm publish` from main only
+4. **Tag**: `git tag v*` after publishing
+5. **Sync**: Merge `main` back to `develop`
+
+### NPM Publishing Rules
+- **ONLY publish from main branch**
+- **ALWAYS tag releases** (`git tag v0.1.0`)
+- **NEVER publish from feature branches**
+- **Use semantic versioning**: MAJOR.MINOR.PATCH
+
+### Quick Commands
+```bash
+# For releases (from release branch)
+npm run release:patch  # 0.1.0 → 0.1.1
+npm run release:minor  # 0.1.0 → 0.2.0
+npm run release:major  # 0.1.0 → 1.0.0
+
+# Check what would be published
+npm run release:dry-run
+```
+
+See `RELEASE-CHECKLIST.md` for detailed release steps.
