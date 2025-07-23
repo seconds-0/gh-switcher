@@ -86,6 +86,28 @@ init_config() {
     [[ -f "$GH_PROJECT_CONFIG" ]] || touch "$GH_PROJECT_CONFIG"
 }
 
+# Check if running as standalone executable (not sourced)
+is_standalone() {
+    # If we're being called from within the ghs function, check how script was invoked
+    # When sourced: script defines functions in current shell
+    # When executed: script runs in subprocess
+    
+    # Bash: direct execution check
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        [[ "${BASH_SOURCE[0]}" == "${0}" ]] && return 0
+        return 1
+    fi
+    
+    # Zsh: Check if script name matches program name
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        # When executed directly, $0 will be the script path
+        # When sourced, $0 will be the shell name (zsh, -zsh, etc.)
+        [[ "$0" =~ gh-switcher\.sh ]] && return 0
+        return 1
+    fi
+    
+    return 1
+}
 
 # =============================================================================
 # FILE UTILITIES
@@ -2330,6 +2352,12 @@ auto_switch_enabled() {
 
 # Auto-switch main command
 cmd_auto_switch() {
+    if is_standalone; then
+        echo "❌ Auto-switch requires shell integration"
+        echo "   See: https://github.com/seconds-0/gh-switcher#manual-installation"
+        return 1
+    fi
+    
     local subcmd="${1:-status}"
     shift 2>/dev/null || true
     
@@ -3264,8 +3292,17 @@ COMMANDS:
   status              Show current account and project state (default)
   doctor              Show diagnostics for troubleshooting
   guard               Prevent wrong-account commits (see 'ghs guard')
+EOF
+
+    # Only show these when sourced
+    if ! is_standalone; then
+        cat << 'EOF'
   auto-switch         Automatic profile switching by directory      [NEW]
   fish-setup          Set up gh-switcher for Fish shell            [NEW]
+EOF
+    fi
+
+    cat << 'EOF'
   help                Show this help message
 
 OPTIONS:
@@ -3281,17 +3318,29 @@ EXAMPLES:
   ghs switch 1
   ghs assign alice
   ghs status
+EOF
+
+    # Only show auto-switch examples when sourced
+    if ! is_standalone; then
+        cat << 'EOF'
 
 AUTO-SWITCHING:
   ghs auto-switch enable     Turn on automatic profile switching
   ghs auto-switch test       Preview what would happen in current directory
   ghs auto-switch status     Check configuration and assigned directories
 EOF
+    fi
     return 0
 }
 
 # Fish shell setup command
 cmd_fish_setup() {
+    if is_standalone; then
+        echo "❌ Fish setup requires shell integration"
+        echo "   See: https://github.com/seconds-0/gh-switcher#manual-installation"
+        return 1
+    fi
+    
     echo "🐟 Setting up gh-switcher for Fish shell..."
     echo
     
