@@ -27,16 +27,23 @@ fi
 if [[ "${GHS_STRICT_MODE:-true}" == "true" ]]; then
     # Check if script is being executed (not sourced)
     if [[ -n "${BASH_VERSION:-}" ]]; then
-        # Bash: check BASH_SOURCE
+        # Bash: check BASH_SOURCE and capture state
         if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+            _ghs_was_sourced="false"
             set -euo pipefail
+        else
+            _ghs_was_sourced="true"
         fi
     elif [[ -n "${ZSH_VERSION:-}" ]]; then
-        # Zsh: check if sourced using zsh_eval_context
+        # Zsh: check if sourced using zsh_eval_context and capture state
         # shellcheck disable=SC2154
         if [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]]; then
             # Not being sourced, safe to set strict mode
+            _ghs_was_sourced="false"
             set -euo pipefail
+        else
+            # Being sourced, capture this state
+            _ghs_was_sourced="true"
         fi
     fi
 fi
@@ -86,6 +93,10 @@ init_config() {
     [[ -f "$GH_PROJECT_CONFIG" ]] || touch "$GH_PROJECT_CONFIG"
 }
 
+# Global variable to store initial execution context
+# Set during script initialization, read by is_standalone()
+_ghs_was_sourced=""
+
 # Check if running as standalone executable (not sourced)
 is_standalone() {
     # Bash: direct execution check
@@ -94,13 +105,9 @@ is_standalone() {
         return 1
     fi
     
-    # Zsh: use eval context consistently with rest of codebase
+    # Zsh: use captured initial state
     if [[ -n "${ZSH_VERSION:-}" ]]; then
-        # Debug: uncomment for troubleshooting
-        # echo "[DEBUG] zsh_eval_context: '${zsh_eval_context[*]:-empty}'" >&2
-        # When sourced, zsh_eval_context contains "file"
-        # When executed, it contains "toplevel" or is empty
-        [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]] && return 0
+        [[ "$_ghs_was_sourced" != "true" ]] && return 0
         return 1
     fi
     
@@ -3428,14 +3435,20 @@ fi
 # If script is executed directly, run with all arguments
 # Handle both bash and zsh
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-    # Bash: check if sourced
+    # Bash: check if sourced and capture state
     if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        _ghs_was_sourced="false"
         ghs "$@"
+    else
+        _ghs_was_sourced="true"
     fi
 elif [[ -n "${ZSH_VERSION:-}" ]]; then
-    # Zsh: check if sourced using zsh_eval_context
+    # Zsh: check if sourced using zsh_eval_context and capture state
     # shellcheck disable=SC2154
     if [[ ! " ${zsh_eval_context[*]} " =~ " file " ]]; then
+        _ghs_was_sourced="false"
         ghs "$@"
+    else
+        _ghs_was_sourced="true"
     fi
 fi
