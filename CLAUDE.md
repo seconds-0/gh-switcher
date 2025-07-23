@@ -13,15 +13,16 @@ Lightning-fast GitHub account switcher for developers with multiple identities. 
 
 ### For Development
 ```bash
-# Before making changes
-npm run ci-check          # Full CI simulation
-
-# During development  
-npm run lint              # ShellCheck validation
-npm test                  # Run all BATS tests
+# During development (fast ~3-5 minutes)
+npm run ci-check-fast     # Quick lint + test check  
+npm run lint              # ShellCheck validation only
+npm test                  # Run all BATS tests only
 
 # Before committing (MANDATORY)
 npm run lint && npm test  # Must both pass
+
+# Full CI simulation (slow ~10 minutes)
+npm run ci-check          # Complete CI validation (use before PRs)
 
 # Install developer pre-commit hooks
 npm run install-dev-hooks # Auto-run lint/tests before commits
@@ -55,9 +56,18 @@ ghs assign <user>         # Assign user to current directory
 - ✅ Tests: 100% execution, zero failures
 - ✅ ShellCheck: Clean (allowed: SC1091, SC2155, SC2181)  
 - ✅ Functions: ~50 lines (guideline for clarity, not hard limit)
-- ✅ Performance: <100ms commands, <300ms hooks
+- ✅ Performance: <100ms commands, <2s hooks (includes GitHub API calls)
 - ✅ Root causes: No workarounds or test modifications
 - ✅ Plan adherence: Delivered what was promised
+
+### CI and Testing Notes
+
+**Expected Timing**:
+- `npm run ci-check-fast`: 3-5 minutes (lint + single test run)
+- `npm run ci-check`: 8-12 minutes (full CI simulation with bash compatibility)
+- `npm test`: 3-5 minutes (211 comprehensive tests)
+
+**For Claude Code users**: Use `ci-check-fast` for development. Reserve `ci-check` for final PR validation.
 
 ### Before Starting Any Task
 Ask yourself:
@@ -318,3 +328,8 @@ npm run release:dry-run
 ```
 
 See `RELEASE-CHECKLIST.md` for detailed release steps.
+
+### Homebrew Tap Maintenance
+- **Formula updates**: See `homebrew-tap/UPDATING.md` for instructions on updating the formula when new versions are released
+- **Tap repository**: Located at https://github.com/seconds-0/homebrew-tap
+- **Standalone detection**: See `Documentation/Plans/HOMEBREW-STANDALONE-DETECTION-PLAN.md` for handling Homebrew vs sourced installations
