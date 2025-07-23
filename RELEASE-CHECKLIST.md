@@ -15,24 +15,17 @@ Use this checklist before publishing to npm.
 
 ## Release Process
 
-1. **On release branch** (e.g., `release/v0.1.0`):
+1. **When ready to release from develop**:
    ```bash
-   # Final test
+   # Make sure develop is clean
+   git checkout develop
+   git pull
    npm run ci-check
    
-   # Verify package contents
-   npm pack --dry-run
+   # Create PR: develop → main on GitHub
    ```
 
-2. **Create PR to main**:
-   ```bash
-   git push -u origin release/v0.1.0
-   # Create PR on GitHub: release/v0.1.0 → main
-   # Wait for CI to pass
-   # Get PR reviewed and merged
-   ```
-
-3. **After PR is merged, publish from main**:
+2. **After PR is merged, publish from main**:
    ```bash
    git checkout main
    git pull origin main

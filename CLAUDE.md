@@ -286,22 +286,19 @@ unset VARIABLE && bash -euo pipefail -c 'source ./script.sh && command'
 
 ## Git Branch Management & NPM Release Process
 
-### Branch Strategy
+### Simple Branch Strategy
 ```
-main (production)     → What's published on npm
-├── develop          → Integration branch for next release
-├── feature/*        → New features (PR → develop)
-├── fix/*           → Bug fixes (PR → develop)
-├── release/v*      → Release prep (PR → main)
-└── hotfix/*        → Emergency fixes (PR → main + develop)
+main          → What's published on npm (protected)
+└── develop   → Where features merge before release
+    ├── feature/*   → New features
+    └── fix/*       → Bug fixes
 ```
 
-### Release Process (ALWAYS follow this)
-1. **Feature Development**: Work in `feature/*` or `fix/*` branches, PR to `develop`
-2. **Release Prep**: Create `release/v*` from `develop`, final testing
-3. **Publish**: Merge to `main`, then `npm publish` from main only
-4. **Tag**: `git tag v*` after publishing
-5. **Sync**: Merge `main` back to `develop`
+### Release Process (Simple)
+1. **Work**: Create branches from `develop`, PR back to `develop`
+2. **Release**: When ready, PR `develop` → `main`
+3. **Publish**: From main: `npm publish` then `git tag v0.1.0`
+4. **Continue**: Keep working on `develop`
 
 ### NPM Publishing Rules
 - **ONLY publish from main branch**
