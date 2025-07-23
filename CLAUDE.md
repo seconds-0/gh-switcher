@@ -56,7 +56,7 @@ ghs assign <user>         # Assign user to current directory
 - ✅ Tests: 100% execution, zero failures
 - ✅ ShellCheck: Clean (allowed: SC1091, SC2155, SC2181)  
 - ✅ Functions: ~50 lines (guideline for clarity, not hard limit)
-- ✅ Performance: <100ms commands, <300ms hooks
+- ✅ Performance: <100ms commands, <2s hooks (includes GitHub API calls)
 - ✅ Root causes: No workarounds or test modifications
 - ✅ Plan adherence: Delivered what was promised
 
