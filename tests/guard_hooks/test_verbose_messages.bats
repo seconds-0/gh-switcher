@@ -56,6 +56,9 @@ teardown() {
     run_guard_command "install"
     assert_success
     
+    # Assign a user to trigger the check
+    echo "test-repo=testuser" > "$GH_PROJECT_CONFIG"
+    
     # Remove gh from PATH to simulate no auth
     cd "$TEST_GIT_REPO"
     PATH="/usr/bin:/bin" run bash .git/hooks/pre-commit
