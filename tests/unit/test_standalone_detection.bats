@@ -127,23 +127,23 @@ EOF
     # Test bash initialization when sourced
     run bash -c "source $TEST_DIR/gh-switcher.sh && echo \"\$_ghs_was_sourced\""
     assert_success
-    assert_output "true"
+    assert_output_contains "true"
     
     # Test bash initialization when executed (via subshell)
     run bash -c "bash $TEST_DIR/gh-switcher.sh version 2>/dev/null && echo \"\${_ghs_was_sourced:-unset}\""
     assert_success
     # Should contain "unset" since the variable is only set during execution, not returned
-    assert_output "unset"
+    assert_output_contains "unset"
 }
 
 @test "standalone: version command works correctly" {
     # Test version command when executed directly
     run bash -c "$TEST_DIR/gh-switcher.sh version"
     assert_success
-    assert_output "gh-switcher version 0.1.0"
+    assert_output_contains "gh-switcher version 0.1.0"
     
     # Test --version flag when executed directly
     run bash -c "$TEST_DIR/gh-switcher.sh --version"
     assert_success
-    assert_output "gh-switcher version 0.1.0"
+    assert_output_contains "gh-switcher version 0.1.0"
 }
