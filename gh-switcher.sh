@@ -107,7 +107,7 @@ is_standalone() {
     
     # Zsh: use captured initial state
     if [[ -n "${ZSH_VERSION:-}" ]]; then
-        [[ "$_ghs_was_sourced" != "true" ]] && return 0
+        [[ "${_ghs_was_sourced:-}" != "true" ]] && return 0
         return 1
     fi
     
@@ -3386,6 +3386,11 @@ cmd_guard() {
     esac
 }
 
+# Version command
+cmd_version() {
+    echo "gh-switcher version 0.1.0"
+}
+
 # Help command
 cmd_help() {
     cat << 'EOF'
@@ -3528,6 +3533,7 @@ ghs() {
         guard)            cmd_guard "$@" ;;
         fish-setup)       cmd_fish_setup ;;      # NEW - Fish shell setup
         help|--help|-h)   cmd_help ;;
+        version|--version|-v) cmd_version ;;
         *)                
             echo "❌ Unknown command: $cmd"
             echo "Try 'ghs help' for usage information"

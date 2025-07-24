@@ -81,7 +81,7 @@ teardown() {
     [[ -x "$TEST_GIT_REPO/.git/hooks/pre-commit" ]]
     
     # Verify hook has correct content (self-contained v2)
-    grep -q "GHS_GUARD_HOOK v2" "$TEST_GIT_REPO/.git/hooks/pre-commit"
+    grep -q "GHS_GUARD_HOOK v3" "$TEST_GIT_REPO/.git/hooks/pre-commit"
     grep -q 'GH_PROJECT_CONFIG' "$TEST_GIT_REPO/.git/hooks/pre-commit"
     
     # Verify the underlying command works
