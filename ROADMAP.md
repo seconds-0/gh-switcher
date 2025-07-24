@@ -11,7 +11,6 @@ Lightning-fast GitHub account switcher for developers with multiple identities. 
 
 ## Completed Features ✅
 
-### Phase 1 Complete
 - [x] **Core Switching** - `ghs switch <user>` with instant context change
 - [x] **User Management** - Add, remove, list users
 - [x] **Profile Management** - View and edit user profiles with `show`/`edit` commands
@@ -21,13 +20,15 @@ Lightning-fast GitHub account switcher for developers with multiple identities. 
 - [x] **SSH Key Testing** - Verify SSH keys authenticate with GitHub during `add` and via `test-ssh` command
 - [x] **Multi-Host Support** - Support for GitHub Enterprise with `--host` parameter, v4 profile format
 - [x] **Directory Auto-Switch** - Automatic profile switching when entering assigned directories
+- [x] **NPM Package Distribution** - Available on npm registry as `gh-switcher`
+- [x] **Homebrew Installation** - Available via `brew tap seconds-0/tap`
+- [x] **Numbered Shortcuts** - Switch with `ghs 1`, `ghs 2`, etc.
 
 ## In Progress 🚧
-
-### NPM Package Distribution
-Package gh-switcher for easy installation via npm.
+*Currently gathering user feedback before implementing new features*
 
 ## High Priority Features 🔥
+*No features currently prioritized - awaiting user feedback*
 
 ## Medium Priority Features 📋
 
@@ -74,18 +75,11 @@ ghs check
 Simple backup without cloud dependencies:
 ```bash
 ghs backup
-# Saved to ~/.gh-switcher-backup-2024-01-15.tar.gz
+# Saved to ~/.gh-switcher-backup-YYYY-MM-DD.tar.gz
 ```
 
 
 ### Quality of Life Improvements
-
-#### Quick Switching
-Numbered shortcuts for frequent users:
-```bash
-ghs 1  # Switch to first user
-ghs 2  # Switch to second user
-```
 
 #### Profile Aliases
 Memorable shortcuts:
