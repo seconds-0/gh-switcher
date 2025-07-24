@@ -3388,7 +3388,31 @@ cmd_guard() {
 
 # Version command
 cmd_version() {
-    echo "gh-switcher version 0.1.0"
+    local version="0.1.0"  # Default version
+    local script_dir
+    
+    # Find the script's directory
+    if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    else
+        # Fallback for zsh
+        script_dir="$(cd "$(dirname "${0}")" && pwd)"
+    fi
+    
+    # Try to read version from package.json
+    local package_json="$script_dir/package.json"
+    if [[ -f "$package_json" ]] && command -v jq >/dev/null 2>&1; then
+        local json_version
+        json_version=$(jq -r .version "$package_json" 2>/dev/null)
+        [[ -n "$json_version" && "$json_version" != "null" ]] && version="$json_version"
+    elif [[ -f "$package_json" ]]; then
+        # Fallback: try to extract version without jq
+        local extracted_version
+        extracted_version=$(grep -E '"version":\s*"[^"]+' "$package_json" | sed -E 's/.*"version":\s*"([^"]+).*/\1/' 2>/dev/null)
+        [[ -n "$extracted_version" ]] && version="$extracted_version"
+    fi
+    
+    echo "gh-switcher version $version"
 }
 
 # Help command
