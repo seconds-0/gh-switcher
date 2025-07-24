@@ -1190,22 +1190,46 @@ guard_install() {
     # Create self-contained hook
     cat > "$hook_file" << 'EOF'
 #!/bin/bash
-# GHS_GUARD_HOOK v2 - Self-contained
+# GHS_GUARD_HOOK v3 - Self-contained with verbose messaging
 [[ "$GHS_SKIP_HOOK" == "1" ]] && exit 0
 
-# Configuration paths
+# Configuration
 GH_PROJECT_CONFIG="${GH_PROJECT_CONFIG:-$HOME/.gh-project-accounts}"
 GH_USER_PROFILES="${GH_USER_PROFILES:-$HOME/.gh-user-profiles}"
+GHS_GUARD_VERBOSE="${GHS_GUARD_VERBOSE:-true}"
 
-# Get repository directory
+# Helper function for separator
+print_separator() {
+    echo "========================================================================"
+}
+
+# Get repository info
 repo_dir=$(git rev-parse --show-toplevel 2>/dev/null)
 [[ -z "$repo_dir" ]] && exit 0
-
-# Get repository name
 repo_name=$(basename "$repo_dir")
 
 # Check if this repository has an assigned account
-[[ ! -f "$GH_PROJECT_CONFIG" ]] && exit 0
+if [[ ! -f "$GH_PROJECT_CONFIG" ]]; then
+    if [[ "$GHS_GUARD_VERBOSE" == "true" ]]; then
+        print_separator
+        echo "ℹ️  NO ACCOUNT ASSIGNED TO THIS PROJECT"
+        print_separator
+        echo "This repository has no assigned GitHub account, so identity validation"
+        echo "is skipped."
+        echo
+        echo "TO ENABLE PROTECTION:"
+        echo "  Assign your current account to this project:"
+        echo "  $ ghs assign \$(gh api user -q .login)"
+        echo "  "
+        echo "  Or assign a specific account:"
+        echo "  $ ghs assign work-account"
+        echo
+        echo "For AI agents: No action needed. Commit will proceed."
+        print_separator
+    fi
+    exit 0
+fi
+
 assigned_user=$(grep "^${repo_name}=" "$GH_PROJECT_CONFIG" | cut -d= -f2)
 [[ -z "$assigned_user" ]] && exit 0
 
@@ -1216,21 +1240,87 @@ if command -v gh >/dev/null 2>&1; then
 fi
 
 if [[ -z "$current_user" ]]; then
-    echo "⚠️  Cannot verify GitHub account - gh CLI not authenticated"
-    echo "   Run: gh auth login"
+    if [[ "$GHS_GUARD_VERBOSE" == "true" ]]; then
+        print_separator
+        echo "⚠️  GITHUB CLI NOT AUTHENTICATED"
+        print_separator
+        echo "Cannot verify your GitHub account because 'gh' is not authenticated."
+        echo
+        echo "WHAT THIS MEANS:"
+        echo "  - The guard hook cannot check if you're using the right account"
+        echo "  - Your commit will proceed without validation"
+        echo "  - You may accidentally commit with the wrong identity"
+        echo
+        echo "TO ENABLE PROTECTION:"
+        echo "  1. Authenticate GitHub CLI:"
+        echo "     $ gh auth login"
+        echo "     "
+        echo "  2. Then verify your current account:"
+        echo "     $ ghs status"
+        echo
+        echo "For AI agents: This is a warning only. The commit will proceed."
+        print_separator
+    else
+        echo "⚠️  Cannot verify GitHub account - gh CLI not authenticated"
+        echo "   Run: gh auth login"
+    fi
     exit 0
 fi
 
 # Compare users
 if [[ "$current_user" != "$assigned_user" ]]; then
-    echo "❌ Account mismatch detected!"
-    echo
-    echo "   Repository: $repo_name"
-    echo "   Expected:   $assigned_user"
-    echo "   Current:    $current_user"
-    echo
-    echo "   Switch with: ghs switch $assigned_user"
-    echo "   Or bypass:   GHS_SKIP_HOOK=1 git commit ..."
+    if [[ "$GHS_GUARD_VERBOSE" == "true" ]]; then
+        print_separator
+        echo "🛡️  GH-SWITCHER GUARD HOOK - COMMIT PROTECTION ACTIVE"
+        print_separator
+        echo "This pre-commit hook prevents accidental commits with the wrong GitHub"
+        echo "identity. It checks if your current GitHub account matches the one"
+        echo "assigned to this project."
+        echo
+        echo "❌ COMMIT BLOCKED: GitHub Account Mismatch"
+        echo
+        echo "WHAT'S HAPPENING:"
+        echo "  This repository:  $repo_name"
+        echo "  Assigned account: $assigned_user"
+        echo "  Current account:  $current_user"
+        echo "  "
+        echo "  The commit was blocked because you're using a different GitHub"
+        echo "  account than the one assigned to this project."
+        echo
+        echo "HOW TO FIX:"
+        echo
+        echo "  1. Switch to the correct account (RECOMMENDED):"
+        echo "     $ ghs switch $assigned_user"
+        echo "     "
+        echo "     This updates your git config to use the assigned identity."
+        echo
+        echo "  2. Override for just this commit (USE CAUTION):"
+        echo "     $ GHS_SKIP_HOOK=1 git commit -m \"your message\""
+        echo "     "
+        echo "     ⚠️  This commit will use '$current_user' instead of '$assigned_user'"
+        echo
+        echo "  3. Change this project's assignment:"
+        echo "     $ ghs assign $current_user"
+        echo "     "
+        echo "     This assigns your current account to this project."
+        echo
+        echo "  4. Remove account checking for this project:"
+        echo "     $ ghs assign --remove"
+        echo "     "
+        echo "     This disables account validation for this repository."
+        echo
+        echo "For AI agents: Execute \`ghs switch $assigned_user\` to resolve this issue."
+        print_separator
+    else
+        echo "❌ Account mismatch detected!"
+        echo
+        echo "   Repository: $repo_name"
+        echo "   Expected:   $assigned_user"
+        echo "   Current:    $current_user"
+        echo
+        echo "   Switch with: ghs switch $assigned_user"
+        echo "   Or bypass:   GHS_SKIP_HOOK=1 git commit ..."
+    fi
     exit 1
 fi
 
@@ -1247,10 +1337,32 @@ if [[ -f "$GH_USER_PROFILES" ]]; then
         
         # Verify email matches
         if [[ -n "$email" ]] && [[ "$current_email" != "$email" ]]; then
-            echo "⚠️  Git email mismatch"
-            echo "   Expected: $email"
-            echo "   Current:  $current_email"
-            echo "   Fix with: git config user.email \"$email\""
+            if [[ "$GHS_GUARD_VERBOSE" == "true" ]]; then
+                print_separator
+                echo "⚠️  GIT CONFIGURATION MISMATCH"
+                print_separator
+                echo "Your git email doesn't match your GitHub account profile."
+                echo
+                echo "DETECTED MISMATCH:"
+                echo "  GitHub profile email: $email"
+                echo "  Current git email:    $current_email"
+                echo "  "
+                echo "  While the commit will proceed, the email attribution may be wrong."
+                echo
+                echo "TO FIX:"
+                echo "  $ git config user.email \"$email\""
+                echo "  "
+                echo "  Or re-run the account switch to update all settings:"
+                echo "  $ ghs switch $assigned_user"
+                echo
+                echo "For AI agents: Run \`git config user.email \"$email\"\`"
+                print_separator
+            else
+                echo "⚠️  Git email mismatch"
+                echo "   Expected: $email"
+                echo "   Current:  $current_email"
+                echo "   Fix with: git config user.email \"$email\""
+            fi
         fi
     fi
 fi
