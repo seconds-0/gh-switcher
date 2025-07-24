@@ -27,16 +27,23 @@ fi
 if [[ "${GHS_STRICT_MODE:-true}" == "true" ]]; then
     # Check if script is being executed (not sourced)
     if [[ -n "${BASH_VERSION:-}" ]]; then
-        # Bash: check BASH_SOURCE
+        # Bash: check BASH_SOURCE and capture state
         if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+            _ghs_was_sourced="false"
             set -euo pipefail
+        else
+            _ghs_was_sourced="true"
         fi
     elif [[ -n "${ZSH_VERSION:-}" ]]; then
-        # Zsh: check if sourced using zsh_eval_context
+        # Zsh: check if sourced using zsh_eval_context and capture state
         # shellcheck disable=SC2154
         if [[ ! " ${zsh_eval_context[*]:-} " =~ " file " ]]; then
             # Not being sourced, safe to set strict mode
+            _ghs_was_sourced="false"
             set -euo pipefail
+        else
+            # Being sourced, capture this state
+            _ghs_was_sourced="true"
         fi
     fi
 fi
@@ -86,6 +93,26 @@ init_config() {
     [[ -f "$GH_PROJECT_CONFIG" ]] || touch "$GH_PROJECT_CONFIG"
 }
 
+# Global variable to store initial execution context
+# Set during script initialization, read by is_standalone()
+_ghs_was_sourced=""
+
+# Check if running as standalone executable (not sourced)
+is_standalone() {
+    # Bash: direct execution check
+    if [[ -n "${BASH_VERSION:-}" ]]; then
+        [[ "${BASH_SOURCE[0]}" == "${0}" ]] && return 0
+        return 1
+    fi
+    
+    # Zsh: use captured initial state
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        [[ "${_ghs_was_sourced:-}" != "true" ]] && return 0
+        return 1
+    fi
+    
+    return 1
+}
 
 # =============================================================================
 # FILE UTILITIES
@@ -2330,6 +2357,12 @@ auto_switch_enabled() {
 
 # Auto-switch main command
 cmd_auto_switch() {
+    if is_standalone; then
+        echo "❌ Auto-switch requires shell integration"
+        echo "   See: https://github.com/seconds-0/gh-switcher#manual-installation"
+        return 1
+    fi
+    
     local subcmd="${1:-status}"
     shift 2>/dev/null || true
     
@@ -3241,6 +3274,35 @@ cmd_guard() {
     esac
 }
 
+# Version command
+cmd_version() {
+    local version="0.1.0"  # Default version
+    local script_dir
+    
+    # Find the script's directory
+    if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    else
+        # Fallback for zsh
+        script_dir="$(cd "$(dirname "${0}")" && pwd)"
+    fi
+    
+    # Try to read version from package.json
+    local package_json="$script_dir/package.json"
+    if [[ -f "$package_json" ]] && command -v jq >/dev/null 2>&1; then
+        local json_version
+        json_version=$(jq -r .version "$package_json" 2>/dev/null)
+        [[ -n "$json_version" && "$json_version" != "null" ]] && version="$json_version"
+    elif [[ -f "$package_json" ]]; then
+        # Fallback: try to extract version without jq
+        local extracted_version
+        extracted_version=$(grep -E '"version":\s*"[^"]+' "$package_json" | sed -E 's/.*"version":\s*"([^"]+).*/\1/' 2>/dev/null)
+        [[ -n "$extracted_version" ]] && version="$extracted_version"
+    fi
+    
+    echo "gh-switcher version $version"
+}
+
 # Help command
 cmd_help() {
     cat << 'EOF'
@@ -3264,8 +3326,17 @@ COMMANDS:
   status              Show current account and project state (default)
   doctor              Show diagnostics for troubleshooting
   guard               Prevent wrong-account commits (see 'ghs guard')
+EOF
+
+    # Only show these when sourced
+    if ! is_standalone; then
+        cat << 'EOF'
   auto-switch         Automatic profile switching by directory      [NEW]
   fish-setup          Set up gh-switcher for Fish shell            [NEW]
+EOF
+    fi
+
+    cat << 'EOF'
   help                Show this help message
 
 OPTIONS:
@@ -3281,17 +3352,29 @@ EXAMPLES:
   ghs switch 1
   ghs assign alice
   ghs status
+EOF
+
+    # Only show auto-switch examples when sourced
+    if ! is_standalone; then
+        cat << 'EOF'
 
 AUTO-SWITCHING:
   ghs auto-switch enable     Turn on automatic profile switching
   ghs auto-switch test       Preview what would happen in current directory
   ghs auto-switch status     Check configuration and assigned directories
 EOF
+    fi
     return 0
 }
 
 # Fish shell setup command
 cmd_fish_setup() {
+    if is_standalone; then
+        echo "❌ Fish setup requires shell integration"
+        echo "   See: https://github.com/seconds-0/gh-switcher#manual-installation"
+        return 1
+    fi
+    
     echo "🐟 Setting up gh-switcher for Fish shell..."
     echo
     
@@ -3362,6 +3445,7 @@ ghs() {
         guard)            cmd_guard "$@" ;;
         fish-setup)       cmd_fish_setup ;;      # NEW - Fish shell setup
         help|--help|-h)   cmd_help ;;
+        version|--version|-v) cmd_version ;;
         *)                
             echo "❌ Unknown command: $cmd"
             echo "Try 'ghs help' for usage information"
@@ -3381,14 +3465,20 @@ fi
 # If script is executed directly, run with all arguments
 # Handle both bash and zsh
 if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-    # Bash: check if sourced
+    # Bash: check if sourced and capture state
     if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+        _ghs_was_sourced="false"
         ghs "$@"
+    else
+        _ghs_was_sourced="true"
     fi
 elif [[ -n "${ZSH_VERSION:-}" ]]; then
-    # Zsh: check if sourced using zsh_eval_context
+    # Zsh: check if sourced using zsh_eval_context and capture state
     # shellcheck disable=SC2154
     if [[ ! " ${zsh_eval_context[*]} " =~ " file " ]]; then
+        _ghs_was_sourced="false"
         ghs "$@"
+    else
+        _ghs_was_sourced="true"
     fi
 fi

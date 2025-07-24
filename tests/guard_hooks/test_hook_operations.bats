@@ -123,8 +123,8 @@ teardown() {
         local end_ms=$(gdate +%s%3N 2>/dev/null || echo "1000")
         local execution_time=$((end_ms - start_ms))
         
-        # Performance requirement: <300ms (reasonable for pre-commit validation)
-        local timeout_ms=$(get_timeout_ms 300)
+        # Performance requirement: <2s (includes GitHub API call)
+        local timeout_ms=$(get_timeout_ms 2000)
         [[ $execution_time -lt $timeout_ms ]]
     else
         # Fallback to seconds-based timing
@@ -132,8 +132,8 @@ teardown() {
         run_guard_hook
         local end_time=$(date +%s)
         local execution_time=$((end_time - start_time))
-        # Performance requirement: <1 second (generous fallback)
-        local timeout_s=$(($(get_timeout_ms 1000) / 1000))
+        # Performance requirement: <3 seconds (generous fallback for seconds-based timing)
+        local timeout_s=$(($(get_timeout_ms 3000) / 1000))
         [[ $execution_time -lt $timeout_s ]]
     fi
 }

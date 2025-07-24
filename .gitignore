@@ -19,6 +19,10 @@ Thumbs.db
 *.swp
 *.swo
 *~
+.cursor/
+.cursorrules
+.claude/
+.mentat/
 
 # Temporary files
 *.tmp
@@ -35,3 +39,11 @@ coverage/
 .env.local
 .env.production
 .npmrc
+
+# Internal documentation
+Documentation/
+CLAUDE.md
+PR_BODY.md
+
+# Separate repositories
+homebrew-tap/

@@ -35,15 +35,32 @@ npm install -g gh-switcher
 
 After installation, the `ghs` command will be available globally.
 
+### Via Homebrew
+```bash
+brew tap seconds-0/tap
+brew install gh-switcher
+```
+
+**Note**: Some features require shell integration and are not available with Homebrew installation:
+- `auto-switch` (automatic profile switching by directory)
+- `fish-setup` (Fish shell configuration)
+
+For these features, use npm installation or see [Manual Installation](#manual-installation).
+
 ### Prerequisites
-Before installing gh-switcher, ensure you have:
+**For npm installation**:
 - **Node.js** (v14 or higher) - [Installation guide](https://nodejs.org/)
+
+**For all installations**:
 - **Git** - [Installation guide](https://git-scm.com/downloads)
 - **GitHub CLI** (`gh`) - [Installation guide](https://cli.github.com/manual/installation)
 
 Verify prerequisites:
 ```bash
+# For npm users
 node --version   # Should show v14.0.0 or higher
+
+# For all users
 git --version    # Should show git version
 gh --version     # Should show gh version
 ```
