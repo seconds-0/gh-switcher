@@ -1198,6 +1198,11 @@ GH_PROJECT_CONFIG="${GH_PROJECT_CONFIG:-$HOME/.gh-project-accounts}"
 GH_USER_PROFILES="${GH_USER_PROFILES:-$HOME/.gh-user-profiles}"
 GHS_GUARD_VERBOSE="${GHS_GUARD_VERBOSE:-true}"
 
+# Sanitize variables to prevent shell injection
+sanitize_var() {
+    printf '%s\n' "$1" | sed 's/[^[:print:]]/?/g'
+}
+
 # Helper function for separator
 print_separator() {
     echo "========================================================================"
@@ -1207,6 +1212,7 @@ print_separator() {
 repo_dir=$(git rev-parse --show-toplevel 2>/dev/null)
 [[ -z "$repo_dir" ]] && exit 0
 repo_name=$(basename "$repo_dir")
+repo_name_safe=$(sanitize_var "$repo_name")
 
 # Check if this repository has an assigned account
 if [[ ! -f "$GH_PROJECT_CONFIG" ]]; then
@@ -1232,12 +1238,14 @@ fi
 
 assigned_user=$(grep "^${repo_name}=" "$GH_PROJECT_CONFIG" | cut -d= -f2)
 [[ -z "$assigned_user" ]] && exit 0
+assigned_user_safe=$(sanitize_var "$assigned_user")
 
 # Get current GitHub user
 current_user=""
 if command -v gh >/dev/null 2>&1; then
     current_user=$(gh api user -q .login 2>/dev/null || true)
 fi
+current_user_safe=$(sanitize_var "$current_user")
 
 if [[ -z "$current_user" ]]; then
     if [[ "$GHS_GUARD_VERBOSE" == "true" ]]; then
@@ -1280,9 +1288,9 @@ if [[ "$current_user" != "$assigned_user" ]]; then
         echo "❌ COMMIT BLOCKED: GitHub Account Mismatch"
         echo
         echo "WHAT'S HAPPENING:"
-        echo "  This repository:  $repo_name"
-        echo "  Assigned account: $assigned_user"
-        echo "  Current account:  $current_user"
+        echo "  This repository:  $repo_name_safe"
+        echo "  Assigned account: $assigned_user_safe"
+        echo "  Current account:  $current_user_safe"
         echo "  "
         echo "  The commit was blocked because you're using a different GitHub"
         echo "  account than the one assigned to this project."
@@ -1290,17 +1298,17 @@ if [[ "$current_user" != "$assigned_user" ]]; then
         echo "HOW TO FIX:"
         echo
         echo "  1. Switch to the correct account (RECOMMENDED):"
-        echo "     $ ghs switch $assigned_user"
+        echo "     $ ghs switch $assigned_user_safe"
         echo "     "
         echo "     This updates your git config to use the assigned identity."
         echo
         echo "  2. Override for just this commit (USE CAUTION):"
         echo "     $ GHS_SKIP_HOOK=1 git commit -m \"your message\""
         echo "     "
-        echo "     ⚠️  This commit will use '$current_user' instead of '$assigned_user'"
+        echo "     ⚠️  This commit will use '$current_user_safe' instead of '$assigned_user_safe'"
         echo
         echo "  3. Change this project's assignment:"
-        echo "     $ ghs assign $current_user"
+        echo "     $ ghs assign $current_user_safe"
         echo "     "
         echo "     This assigns your current account to this project."
         echo
@@ -1309,16 +1317,16 @@ if [[ "$current_user" != "$assigned_user" ]]; then
         echo "     "
         echo "     This disables account validation for this repository."
         echo
-        echo "For AI agents: Execute \`ghs switch $assigned_user\` to resolve this issue."
+        echo "For AI agents: Execute \`ghs switch $assigned_user_safe\` to resolve this issue."
         print_separator
     else
         echo "❌ Account mismatch detected!"
         echo
-        echo "   Repository: $repo_name"
-        echo "   Expected:   $assigned_user"
-        echo "   Current:    $current_user"
+        echo "   Repository: $repo_name_safe"
+        echo "   Expected:   $assigned_user_safe"
+        echo "   Current:    $current_user_safe"
         echo
-        echo "   Switch with: ghs switch $assigned_user"
+        echo "   Switch with: ghs switch $assigned_user_safe"
         echo "   Or bypass:   GHS_SKIP_HOOK=1 git commit ..."
     fi
     exit 1
@@ -1334,6 +1342,9 @@ if [[ -f "$GH_USER_PROFILES" ]]; then
         
         # Get current git config
         current_email=$(git config user.email 2>/dev/null || true)
+        # Sanitize email variables
+        email_safe=$(sanitize_var "$email")
+        current_email_safe=$(sanitize_var "$current_email")
         
         # Verify email matches
         if [[ -n "$email" ]] && [[ "$current_email" != "$email" ]]; then
@@ -1344,24 +1355,24 @@ if [[ -f "$GH_USER_PROFILES" ]]; then
                 echo "Your git email doesn't match your GitHub account profile."
                 echo
                 echo "DETECTED MISMATCH:"
-                echo "  GitHub profile email: $email"
-                echo "  Current git email:    $current_email"
+                echo "  GitHub profile email: $email_safe"
+                echo "  Current git email:    $current_email_safe"
                 echo "  "
                 echo "  While the commit will proceed, the email attribution may be wrong."
                 echo
                 echo "TO FIX:"
-                echo "  $ git config user.email \"$email\""
+                echo "  $ git config user.email \"$email_safe\""
                 echo "  "
                 echo "  Or re-run the account switch to update all settings:"
-                echo "  $ ghs switch $assigned_user"
+                echo "  $ ghs switch $assigned_user_safe"
                 echo
-                echo "For AI agents: Run \`git config user.email \"$email\"\`"
+                echo "For AI agents: Run \`git config user.email \"$email_safe\"\`"
                 print_separator
             else
                 echo "⚠️  Git email mismatch"
-                echo "   Expected: $email"
-                echo "   Current:  $current_email"
-                echo "   Fix with: git config user.email \"$email\""
+                echo "   Expected: $email_safe"
+                echo "   Current:  $current_email_safe"
+                echo "   Fix with: git config user.email \"$email_safe\""
             fi
         fi
     fi
