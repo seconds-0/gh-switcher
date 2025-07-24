@@ -107,7 +107,7 @@ teardown() {
     assert_success
     
     cd "$TEST_GIT_REPO"
-    GHS_SKIP_HOOK=1 run bash "$TEST_GUARD_SCRIPT"
+    GHS_SKIP_HOOK=1 run bash .git/hooks/pre-commit
     assert_success
 }
 

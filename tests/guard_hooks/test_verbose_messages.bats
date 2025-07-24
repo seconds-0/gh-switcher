@@ -43,7 +43,7 @@ teardown() {
     echo "test-repo=different-user" > "$GH_PROJECT_CONFIG"
     
     cd "$TEST_GIT_REPO"
-    GHS_GUARD_VERBOSE=false run bash "$TEST_GUARD_SCRIPT"
+    GHS_GUARD_VERBOSE=false run bash .git/hooks/pre-commit
     assert_failure
     
     # Check for terse message
@@ -80,7 +80,7 @@ teardown() {
     cd "$TEST_GIT_REPO"
     git config user.email "wrong@example.com"
     
-    run bash "$TEST_GUARD_SCRIPT"
+    run bash .git/hooks/pre-commit
     assert_success  # Should succeed with warning
     
     assert_output_contains "GIT CONFIGURATION MISMATCH"
@@ -102,7 +102,7 @@ teardown() {
     
     # Test verbose can be disabled
     echo "test-repo=different-user" > "$GH_PROJECT_CONFIG"
-    GHS_GUARD_VERBOSE=false run bash "$TEST_GUARD_SCRIPT"
+    GHS_GUARD_VERBOSE=false run bash .git/hooks/pre-commit
     assert_failure
     assert_output_not_contains "HOW TO FIX:"
 }
