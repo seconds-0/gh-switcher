@@ -2114,7 +2114,8 @@ cmd_show() {
     
     # Resolve username from input (ID or name)
     local username
-    if [[ "$input" =~ ^[0-9]+$ ]]; then
+    # If input is numeric and a user with that name does not exist, treat as ID
+    if [[ "$input" =~ ^[0-9]+$ ]] && ! user_exists "$input"; then
         username=$(user_get_by_id "$input") || {
             echo "❌ User ID $input not found" >&2
             return 1
@@ -2270,7 +2271,8 @@ cmd_edit() {
     
     # Resolve username from input (ID or name)
     local username
-    if [[ "$input" =~ ^[0-9]+$ ]]; then
+    # If input is numeric and a user with that name does not exist, treat as ID
+    if [[ "$input" =~ ^[0-9]+$ ]] && ! user_exists "$input"; then
         username=$(user_get_by_id "$input") || {
             echo "❌ User ID $input not found" >&2
             return 1
