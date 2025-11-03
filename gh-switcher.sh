@@ -233,6 +233,21 @@ file_remove_line() {
     mv "$temp_file" "$filepath"
 }
 
+# Retrieve octal permissions for a file (cross-platform)
+file_get_permissions() {
+    local filepath="$1"
+    local os_name="${GHS_FORCE_UNAME:-$(uname)}"
+
+    [[ -n "$filepath" ]] || return 1
+    [[ -e "$filepath" ]] || return 1
+
+    if [[ "$os_name" == "Darwin" ]]; then
+        stat -f "%Lp" "$filepath" 2>/dev/null
+    else
+        stat -c "%a" "$filepath" 2>/dev/null
+    fi
+}
+
 # =============================================================================
 # VALIDATION UTILITIES
 # =============================================================================
@@ -340,42 +355,38 @@ validate_ssh_key() {
         return 1
     fi
     
-    # Check permissions
-    local perms
-    if [[ "$(uname)" == "Darwin" ]]; then
-        # macOS stat returns octal permissions
-        perms=$(stat -f "%Lp" "$key_path" 2>/dev/null)
-    else
-        # Linux stat (also works for Git Bash which uses GNU coreutils)
-        perms=$(stat -c "%a" "$key_path" 2>/dev/null)
+    # On Windows/Git Bash, permissions don't behave the same way
+    if [[ "$OSTYPE" == "msys" ]]; then
+        if [[ "$fix_perms" == "true" ]]; then
+            chmod 600 "$key_path" 2>/dev/null || true
+            echo "ℹ️  Note: SSH key permissions are limited on Windows NTFS" >&2
+            echo "   Git Bash SSH will work correctly despite this" >&2
+        fi
+        return 0
     fi
     
-    if [[ "$perms" != "600" ]]; then
-        # On Windows/Git Bash, permissions don't work the same way
-        if [[ "$OSTYPE" == "msys" ]]; then
-            if [[ "$fix_perms" == "true" ]]; then
-                # Try chmod anyway (sets read-only bit at least)
-                chmod 600 "$key_path" 2>/dev/null || true
-                echo "ℹ️  Note: SSH key permissions are limited on Windows NTFS" >&2
-                echo "   Git Bash SSH will work correctly despite this" >&2
-            fi
-            # Return success because Git Bash SSH truly doesn't enforce permissions
-            # This is not test theatre - it reflects actual SSH behavior on Windows
-            return 0
-        else
-            # On Unix systems, this is a real security issue
-            if [[ "$fix_perms" == "true" ]]; then
-                echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
-                echo "   Set permissions to 600" >&2
-                if ! chmod 600 "$key_path"; then
-                    echo "❌ Failed to fix SSH key permissions" >&2
-                    return 1
-                fi
-            else
-                echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
-                echo "   Set permissions to 600 with: chmod 600 $key_path" >&2
+    local perms
+    perms=$(file_get_permissions "$key_path")
+    if [[ -z "$perms" ]]; then
+        echo "❌ Unable to determine permissions for: $key_path" >&2
+        return 1
+    fi
+    
+    local perms_trimmed="${perms##0}"
+    [[ -z "$perms_trimmed" ]] && perms_trimmed="$perms"
+    
+    if [[ "$perms_trimmed" != "600" ]]; then
+        if [[ "$fix_perms" == "true" ]]; then
+            echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
+            echo "   Set permissions to 600" >&2
+            if ! chmod 600 "$key_path"; then
+                echo "❌ Failed to fix SSH key permissions" >&2
                 return 1
             fi
+        else
+            echo "⚠️  SSH key has incorrect permissions: $key_path" >&2
+            echo "   Set permissions to 600 with: chmod 600 $key_path" >&2
+            return 1
         fi
     fi
     
@@ -723,11 +734,19 @@ project_assign() {
     
     # Copy all assignments except the one being updated
     if [[ -f "$GH_PROJECT_CONFIG" ]]; then
-        grep -v "^$project=" "$GH_PROJECT_CONFIG" > "$temp_file" || true
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" != *"|"* && "$line" == *"="* ]]; then
+                local existing_project="${line%%=*}"
+                if [[ "$existing_project" == "$project" ]]; then
+                    continue
+                fi
+            fi
+            printf '%s\n' "$line" >> "$temp_file"
+        done < "$GH_PROJECT_CONFIG"
     fi
     
     # Add new assignment
-    echo "$project=$username" >> "$temp_file" || { trap - EXIT; rm -f "$temp_file"; return 1; }
+    printf '%s=%s\n' "$project" "$username" >> "$temp_file" || { trap - EXIT; rm -f "$temp_file"; return 1; }
     
     # Atomic replace
     mv -f "$temp_file" "$GH_PROJECT_CONFIG"
@@ -777,8 +796,16 @@ project_assign_path() {
     
     # Copy all assignments except the one being updated
     if [[ -f "$GH_PROJECT_CONFIG" ]]; then
-        # Keep old format assignments (project=user)
-        grep -v "^${escaped_path}|" "$GH_PROJECT_CONFIG" > "$temp_file" || true
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" == *"|"* ]]; then
+                local stored_path="${line%%|*}"
+                stored_path="${stored_path//\\|/|}"
+                if [[ "$stored_path" == "$dir_path" ]]; then
+                    continue
+                fi
+            fi
+            printf '%s\n' "$line" >> "$temp_file"
+        done < "$GH_PROJECT_CONFIG"
     fi
     
     # Add new path assignment with marker
@@ -1582,19 +1609,9 @@ cmd_add() {
         # Expand tilde in path
         ssh_key="${ssh_key/#~/$HOME}"
         
-        if [[ ! -f "$ssh_key" ]]; then
-            echo "⚠️  SSH key not found: $ssh_key" >&2
+        if ! validate_ssh_key "$ssh_key" true; then
             echo "   Continuing with HTTPS mode" >&2
             ssh_key=""  # Clear SSH key to use HTTPS
-        elif ! grep -q "BEGIN.*PRIVATE KEY" "$ssh_key" 2>/dev/null; then
-            echo "⚠️  Invalid SSH key format: $ssh_key" >&2
-            echo "   File doesn't appear to be a private key" >&2
-            echo "   Continuing with HTTPS mode" >&2
-            ssh_key=""  # Clear SSH key to use HTTPS
-        elif [[ $(stat -f "%a" "$ssh_key" 2>/dev/null || stat -c "%a" "$ssh_key" 2>/dev/null) != "600" ]]; then
-            echo "⚠️  SSH key has incorrect permissions: $ssh_key" >&2
-            echo "   Set permissions to 600 with: chmod 600 $ssh_key" >&2
-            chmod 600 "$ssh_key" 2>/dev/null || true
         fi
         
         # Test SSH authentication if key is valid
@@ -1885,11 +1902,20 @@ cmd_assign_remove() {
         return 1
     fi
     
-    # Escape path for grep
-    local escaped_path="${dir_path//|/\\|}"
-    
     # Check if assignment exists
-    if ! grep -q "^${escaped_path}|" "$GH_PROJECT_CONFIG" 2>/dev/null; then
+    local found="false"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" == *"|"* ]]; then
+            local stored_path="${line%%|*}"
+            stored_path="${stored_path//\\|/|}"
+            if [[ "$stored_path" == "$dir_path" ]]; then
+                found="true"
+                break
+            fi
+        fi
+    done < "$GH_PROJECT_CONFIG"
+    
+    if [[ "$found" != "true" ]]; then
         echo "❌ No assignment found for: $dir_path" >&2
         return 1
     fi
@@ -1898,7 +1924,17 @@ cmd_assign_remove() {
     local temp_file
     temp_file=$(mktemp "${GH_PROJECT_CONFIG}.XXXXXX") || return 1
     
-    grep -v "^${escaped_path}|" "$GH_PROJECT_CONFIG" > "$temp_file" || true
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" == *"|"* ]]; then
+            local stored_path="${line%%|*}"
+            stored_path="${stored_path//\\|/|}"
+            if [[ "$stored_path" == "$dir_path" ]]; then
+                continue
+            fi
+        fi
+        printf '%s\n' "$line" >> "$temp_file"
+    done < "$GH_PROJECT_CONFIG"
+    
     mv -f "$temp_file" "$GH_PROJECT_CONFIG"
     
     echo "✅ Removed assignment for: $dir_path"
@@ -2442,11 +2478,72 @@ cmd_edit_update_profile() {
 AUTO_SWITCH_CACHE_DIR="/tmp/.ghs-auto-switch-cache-$USER"
 AUTO_SWITCH_CACHE_TTL=300  # 5 minutes
 
+# Generate deterministic cache hash with graceful fallbacks
+auto_switch_hash_fallback() {
+    local input="$1"
+    local crc length
+
+    crc=$(printf '%s' "$input" | cksum 2>/dev/null | awk '{print $1}')
+    length=${#input}
+
+    # Ensure we always have numeric values (cksum may fail on exotic systems)
+    if [[ -z "$crc" ]]; then
+        crc=0
+    fi
+
+    printf '%08x%08x\n' "$((10#$crc % 0x100000000))" "$length"
+}
+
+auto_switch_hash() {
+    local input="$1"
+    local hash output
+
+    if output=$(printf '%s' "$input" | sha256sum 2>/dev/null); then
+        hash="${output%% *}"
+        echo "${hash:0:16}"
+        return 0
+    fi
+
+    if output=$(printf '%s' "$input" | shasum -a 256 2>/dev/null); then
+        hash="${output%% *}"
+        echo "${hash:0:16}"
+        return 0
+    fi
+
+    if output=$(printf '%s' "$input" | openssl dgst -sha256 2>/dev/null); then
+        hash="${output##* }"
+        echo "${hash:0:16}"
+        return 0
+    fi
+
+    output=$(python3 - "$input" <<'PY' 2>/dev/null
+import hashlib, sys
+print(hashlib.sha256(sys.argv[1].encode()).hexdigest())
+PY
+    )
+    if [[ $? -eq 0 && -n "$output" ]]; then
+        echo "${output:0:16}"
+        return 0
+    fi
+
+    output=$(python - "$input" <<'PY' 2>/dev/null
+import hashlib, sys
+print(hashlib.sha256(sys.argv[1].encode()).hexdigest())
+PY
+    )
+    if [[ $? -eq 0 && -n "$output" ]]; then
+        echo "${output:0:16}"
+        return 0
+    fi
+
+    auto_switch_hash_fallback "$input"
+}
+
 # Get cache file for a given path
 auto_switch_cache_file() {
     local dir_path="$1"
     local hash
-    hash=$(echo -n "$dir_path" | sha256sum | cut -c1-16)
+    hash=$(auto_switch_hash "$dir_path")
     echo "$AUTO_SWITCH_CACHE_DIR/path-$hash"
 }
 
