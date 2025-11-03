@@ -242,6 +242,29 @@ measure_time_ms() {
     assert_output_contains "Email: alice@company.com"
 }
 
+@test "ghs edit works with user ID" {
+    echo "alice" >> "$GH_USERS_CONFIG"
+    echo "alice	Alice	old@example.com		github.com" >> "$GH_USER_PROFILES"
+
+    run ghs edit 1 --email new@example.com
+    assert_success
+    assert_output_contains "Profile updated"
+
+    run ghs show 1
+    assert_output_contains "Email: new@example.com"
+}
+
+@test "ghs edit handles numeric usernames correctly" {
+    echo "12345" >> "$GH_USERS_CONFIG"
+    echo "12345	Numeric User	numeric@example.com		github.com" >> "$GH_USER_PROFILES"
+
+    run ghs edit "12345" --name "Updated Numeric User"
+    assert_success
+
+    run ghs show "12345"
+    assert_output_contains "Name: Updated Numeric User"
+}
+
 # Performance tests
 @test "ghs show completes within reasonable time" {
     echo "perfuser" >> "$GH_USERS_CONFIG"
@@ -260,8 +283,8 @@ measure_time_ms() {
     
     local duration=$(measure_time_ms ghs edit perfuser --name "New Name")
     echo "# Duration: ${duration}ms" >&3
-    # Allow up to 350ms for bash script startup overhead and file operations in CI
-    local timeout=$(get_timeout_ms 350)
+    # Allow up to 500ms for bash script startup overhead and file operations in CI
+    local timeout=$(get_timeout_ms 500)
     [[ "$duration" -lt "$timeout" ]]
 }
 

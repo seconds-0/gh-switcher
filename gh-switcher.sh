@@ -2114,7 +2114,8 @@ cmd_show() {
     
     # Resolve username from input (ID or name)
     local username
-    if [[ "$input" =~ ^[0-9]+$ ]]; then
+    # If input is numeric and a user with that name does not exist, treat as ID
+    if [[ "$input" =~ ^[0-9]+$ ]] && ! user_exists "$input"; then
         username=$(user_get_by_id "$input") || {
             echo "❌ User ID $input not found" >&2
             return 1
@@ -2261,13 +2262,25 @@ cmd_edit_usage() {
 # necessary validation, profile handling, and argument parsing that would
 # be awkward to split further.
 cmd_edit() {
-    local username="${1:-}"
+    local input="${1:-}"
     
-    if [[ -z "$username" ]] || [[ "$username" == "--help" ]]; then
+    if [[ -z "$input" ]] || [[ "$input" == "--help" ]]; then
         cmd_edit_usage
         return 1
     fi
     
+    # Resolve username from input (ID or name)
+    local username
+    # If input is numeric and a user with that name does not exist, treat as ID
+    if [[ "$input" =~ ^[0-9]+$ ]] && ! user_exists "$input"; then
+        username=$(user_get_by_id "$input") || {
+            echo "❌ User ID $input not found" >&2
+            return 1
+        }
+    else
+        username="$input"
+    fi
+
     # Check if user exists
     if ! user_exists "$username"; then
         echo "❌ User '$username' not found"

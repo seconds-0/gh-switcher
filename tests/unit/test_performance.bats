@@ -87,9 +87,9 @@ measure_time_ms() {
 @test "ghs status completes within 250ms" {
     local duration=$(measure_time_ms cmd_status)
     echo "# Duration: ${duration}ms" >&3
-    # CI environments may be slower
+    # CI environments may be slower, especially macOS with GitHub API calls
     local threshold=250
-    [[ -n "${CI:-}" ]] && threshold=400
+    [[ -n "${CI:-}" ]] && threshold=750
     # Windows is even slower due to POSIX emulation
     [[ "$OSTYPE" == "msys" ]] && threshold=$((threshold * ${GHS_PERF_MULTIPLIER:-2}))
     [[ "$duration" -lt "$threshold" ]]
