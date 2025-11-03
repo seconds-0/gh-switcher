@@ -47,7 +47,30 @@ teardown() {
     # Then – mapping file contains repo path → bob
     local mapping_file="$GH_PROJECT_CONFIG"
     assert_file_exists "$mapping_file"
-    grep -q "$(basename "$TEST_MAIN_REPO")=bob" "$mapping_file"
+    grep -Fq "$(basename "$TEST_MAIN_REPO")=bob" "$mapping_file"
 
     # (Auto-switch without id not yet implemented; just verify mapping)
-} 
+}
+
+@test "ghs assign handles directories with regex metacharacters" {
+    cmd_add "regexuser" >/dev/null 2>&1
+
+    local special_dir="$TEST_HOME/repos/project[spec].repo"
+    mkdir -p "$special_dir"
+    cd "$special_dir"
+    git init >/dev/null 2>&1
+
+    run ghs assign regexuser
+    assert_success
+    assert_output_contains "Assigned regexuser"
+
+    grep -Fq "$special_dir|regexuser" "$GH_PROJECT_CONFIG"
+
+    cd "$TEST_HOME"
+
+    run ghs assign --remove "$special_dir"
+    assert_success
+    assert_output_contains "Removed assignment"
+
+    ! grep -Fq "$special_dir|regexuser" "$GH_PROJECT_CONFIG"
+}

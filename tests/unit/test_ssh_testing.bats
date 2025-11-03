@@ -273,6 +273,54 @@ EOF
     assert_output_contains "✅ Added alice to user list"
 }
 
+@test "cmd_add does not warn about permissions on macOS when key is secure" {
+    local key="$TEST_HOME/.ssh/macos_key"
+    mkdir -p "$TEST_HOME/.ssh"
+    {
+        echo "-----BEGIN OPENSSH PRIVATE KEY-----"
+        echo "test key content"
+        echo "-----END OPENSSH PRIVATE KEY-----"
+    } > "$key"
+    chmod 600 "$key"
+    
+    local original_path="$PATH"
+    local fake_bin="$TEST_HOME/fake_bin"
+    mkdir -p "$fake_bin"
+    
+    export REAL_STAT="$(command -v stat)"
+    cat > "$fake_bin/stat" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "-f" ]]; then
+    echo "0600"
+    exit 0
+fi
+"$REAL_STAT" "$@"
+EOF
+    chmod +x "$fake_bin/stat"
+    
+    cat > "$fake_bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" =~ "-T git@github.com" ]]; then
+    echo "Hi bob! You've successfully authenticated, but GitHub does not provide shell access." >&2
+    exit 1
+fi
+EOF
+    chmod +x "$fake_bin/ssh"
+    
+    export PATH="$fake_bin:$PATH"
+    export GHS_FORCE_UNAME="Darwin"
+    
+    run ghs add bob --ssh-key "$key"
+    
+    PATH="$original_path"
+    unset GHS_FORCE_UNAME
+    unset REAL_STAT
+    
+    assert_success
+    assert_output_not_contains "incorrect permissions"
+    assert_output_contains "✅ Added bob to user list"
+}
+
 @test "SSH testing integration is working" {
     # This is a simplified test to verify SSH testing is integrated
     # The complex interactive behavior is hard to test in unit tests
