@@ -31,7 +31,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "18"
+          node-version: "24"
 
       # Install system deps: ShellCheck ≥1.0 & BATS ≥1.10
       - name: Install ShellCheck & BATS (Linux)
